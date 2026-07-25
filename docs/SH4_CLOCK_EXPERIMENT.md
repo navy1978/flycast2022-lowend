@@ -3,7 +3,7 @@
 ## Purpose
 
 Current Flycast exposes an emulated SH4 clock option. A conservative backport
-is included in Flycast 2021 Low-End so different values can be tested per game
+is included in Flycast 2022 Low-End so different values can be tested per game
 without changing the accurate default.
 
 This is a timing hack, not a renderer optimization. It may make a game easier
@@ -32,7 +32,7 @@ ARM64 Cortex-A35 build:
 SHA-256: 7ed7aca13fabddec62d12b257b4a29d7521b1c566de76af31ab91a2f01f72e52
 ```
 
-The binary was rebuilt from the complete Flycast 2021 Low-End source with the
+The binary was rebuilt from the complete Flycast 2022 Low-End source with the
 SH4 option integrated and the AmberELEC identity, using the established
 Cortex-A35 flags. Binary string inspection confirmed that
 `flycast2021_sh4clock` and its option label are present. A direct or dArkOS

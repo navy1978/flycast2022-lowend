@@ -2,7 +2,7 @@
 
 Date: 2026-07-24
 
-Base used by Flycast 2021 Low-End:
+Base used by Flycast 2022 Low-End:
 
 ```text
 4c293f306bc16a265c2d768af5d0cea138426054

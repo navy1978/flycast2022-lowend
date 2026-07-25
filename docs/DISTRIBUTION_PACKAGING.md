@@ -15,31 +15,30 @@ to a frontend.
 
 ## AmberELEC
 
-AmberELEC historically installs this 2022 core alongside modern Flycast. Its
-`flycast2021/package.mk` performs three packaging transformations:
+AmberELEC installs this fork as a new core alongside modern Flycast and the
+historical Flycast 2021 package. Its `flycast2022/package.mk` performs three
+packaging transformations:
 
-1. `CORE_OPTION_NAME` changes from `reicast` to `flycast2021`;
-2. the libretro library name changes from `Flycast` to `Flycast 2021`;
-3. `flycast_libretro.so` is installed as `flycast2021_libretro.so`.
+1. `CORE_OPTION_NAME` changes from `reicast` to `flycast2022`;
+2. the libretro library name changes from `Flycast` to `Flycast 2022 Low-End`;
+3. `flycast_libretro.so` is installed as `flycast2022_libretro.so`.
 
-Keep those transformations in the AmberELEC package. When switching the
-package to this fork, only its source URL, commit and archive checksum need to
-change. The resulting low-end option keys are:
+The resulting low-end option keys are:
 
 ```text
-flycast2021_sh4clock
-flycast2021_adjacent_state_elision
-flycast2021_translucent_strip_merge
-flycast2021_translucent_menu_guard_strategy
-flycast2021_translucent_menu_guard_max_vertices
-flycast2021_translucent_menu_guard_risk
-flycast2021_translucent_menu_guard_depth_tolerance
-flycast2021_translucent_menu_guard_overlap
-flycast2021_translucent_menu_guard_draw_sorting
+flycast2022_sh4clock
+flycast2022_adjacent_state_elision
+flycast2022_translucent_strip_merge
+flycast2022_translucent_menu_guard_strategy
+flycast2022_translucent_menu_guard_max_vertices
+flycast2022_translucent_menu_guard_risk
+flycast2022_translucent_menu_guard_depth_tolerance
+flycast2022_translucent_menu_guard_overlap
+flycast2022_translucent_menu_guard_draw_sorting
 ```
 
-This preserves existing AmberELEC RetroArch and RetroRun configurations and
-keeps their core-specific save-state/override naming unchanged.
+The separate identity prevents its settings, overrides and save states from
+colliding with AmberELEC's existing Flycast and Flycast 2021 cores.
 
 ## dArkOS
 

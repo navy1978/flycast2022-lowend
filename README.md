@@ -1,6 +1,6 @@
-# Flycast 2021 Low-End
+# Flycast 2022 Low-End
 
-Flycast 2021 Low-End is an unofficial, performance-oriented libretro fork for
+Flycast 2022 Low-End is an unofficial, performance-oriented libretro fork for
 low-power ARM handhelds. It is based on
 [`libretro/flycast` commit `4c293f3`](https://github.com/libretro/flycast/tree/4c293f306bc16a265c2d768af5d0cea138426054)
 from 6 April 2022.
@@ -26,13 +26,14 @@ Build output: flycast_libretro.so
 ```
 
 Distribution packaging may rename this identity without maintaining a separate
-source branch. AmberELEC rewrites the option prefix to `flycast2021`, changes
-the library name to `Flycast 2021`, and installs the core as
-`flycast2021_libretro.so`. dArkOS keeps the source defaults, so its existing
+source branch. AmberELEC packages this fork separately from its historical
+Flycast 2021 core, rewrites the option prefix to `flycast2022`, changes the
+library name to `Flycast 2022 Low-End`, and installs the core as
+`flycast2022_libretro.so`. dArkOS can keep the source defaults, so its existing
 `reicast_*` configuration continues to work.
 
 The configuration examples below use the source/dArkOS `reicast_*` names. On
-AmberELEC, replace only the `reicast_` prefix with `flycast2021_`. See
+AmberELEC, replace only the `reicast_` prefix with `flycast2022_`. See
 [the distribution packaging guide](docs/DISTRIBUTION_PACKAGING.md) for the
 exact mapping and build requirements.
 
