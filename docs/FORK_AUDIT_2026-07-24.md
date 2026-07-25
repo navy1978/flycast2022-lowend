@@ -8,6 +8,11 @@ Base used by Flycast 2021 Low-End:
 4c293f306bc16a265c2d768af5d0cea138426054
 ```
 
+Naming note: the candidate binaries recorded in this audit used the
+AmberELEC-style `flycast2021_*` option prefix and `Flycast 2021` library name.
+The current source keeps the base revision's `reicast_*`/`Flycast` identity;
+AmberELEC recreates the recorded identity during packaging.
+
 ## Method
 
 The GitHub fork networks for the historical libretro Flycast repository and
@@ -109,7 +114,8 @@ instruction-level validation.
 SHA-256: b6df075010de446d953515bcfbbd3a2e728f923d66fec93fcde9944c4ec2dd7b
 ```
 
-The binary is AArch64, identifies as `Flycast 2021`, and contains:
+The historical candidate is AArch64, identifies as `Flycast 2021`, and
+contains:
 
 ```text
 flycast2021_sh4clock

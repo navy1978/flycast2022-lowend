@@ -15,17 +15,39 @@ configuration, refer to the
 and the
 [upstream source at the base revision](https://github.com/libretro/flycast/tree/4c293f306bc16a265c2d768af5d0cea138426054).
 
+## Core identity and distribution packaging
+
+The source keeps the identity inherited from the base revision:
+
+```text
+Core option prefix: reicast
+Libretro library name: Flycast
+Build output: flycast_libretro.so
+```
+
+Distribution packaging may rename this identity without maintaining a separate
+source branch. AmberELEC rewrites the option prefix to `flycast2021`, changes
+the library name to `Flycast 2021`, and installs the core as
+`flycast2021_libretro.so`. dArkOS keeps the source defaults, so its existing
+`reicast_*` configuration continues to work.
+
+The configuration examples below use the source/dArkOS `reicast_*` names. On
+AmberELEC, replace only the `reicast_` prefix with `flycast2021_`. See
+[the distribution packaging guide](docs/DISTRIBUTION_PACKAGING.md) for the
+exact mapping and build requirements.
+
 ## New core options
 
-The option prefix remains `flycast2021` so existing Flycast 2021
-configurations continue to work.
+All option keys are generated from the compile-time core option prefix. This
+keeps the implementation identical across distributions while allowing each
+package to preserve its existing configuration names.
 
 ### Adjacent Render-State Elision
 
 Key:
 
 ```text
-flycast2021_adjacent_state_elision
+reicast_adjacent_state_elision
 ```
 
 Values:
@@ -44,7 +66,7 @@ for broader per-game testing.
 Key:
 
 ```text
-flycast2021_translucent_strip_merge
+reicast_translucent_strip_merge
 ```
 
 Values:
@@ -61,12 +83,12 @@ Values:
 The guarded detector is intentionally configurable without rebuilding:
 
 ```ini
-flycast2021_translucent_menu_guard_strategy = scored
-flycast2021_translucent_menu_guard_max_vertices = 8
-flycast2021_translucent_menu_guard_risk = 5
-flycast2021_translucent_menu_guard_depth_tolerance = 0.0001
-flycast2021_translucent_menu_guard_overlap = risky
-flycast2021_translucent_menu_guard_draw_sorting = standard
+reicast_translucent_menu_guard_strategy = scored
+reicast_translucent_menu_guard_max_vertices = 8
+reicast_translucent_menu_guard_risk = 5
+reicast_translucent_menu_guard_depth_tolerance = 0.0001
+reicast_translucent_menu_guard_overlap = risky
+reicast_translucent_menu_guard_draw_sorting = standard
 ```
 
 For a menu not detected by the default profile, first try
@@ -90,7 +112,7 @@ device and game observations.
 Key:
 
 ```text
-flycast2021_sh4clock
+reicast_sh4clock
 ```
 
 Values range from `50` to `400` MHz, with the accurate Dreamcast default at
@@ -115,23 +137,23 @@ renderer experiments, are preserved in the
 Start with the accurate path:
 
 ```ini
-flycast2021_adjacent_state_elision = disabled
-flycast2021_translucent_strip_merge = disabled
-flycast2021_sh4clock = 200
+reicast_adjacent_state_elision = disabled
+reicast_translucent_strip_merge = disabled
+reicast_sh4clock = 200
 ```
 
 For a game already verified with the faster translucent path:
 
 ```ini
-flycast2021_sh4clock = 200
-flycast2021_adjacent_state_elision = disabled
-flycast2021_translucent_strip_merge = menu_guarded
-flycast2021_translucent_menu_guard_strategy = all_short
-flycast2021_translucent_menu_guard_max_vertices = 64
-flycast2021_translucent_menu_guard_risk = 5
-flycast2021_translucent_menu_guard_depth_tolerance = 0.01
-flycast2021_translucent_menu_guard_overlap = all
-flycast2021_translucent_menu_guard_draw_sorting = per_triangle
+reicast_sh4clock = 200
+reicast_adjacent_state_elision = disabled
+reicast_translucent_strip_merge = menu_guarded
+reicast_translucent_menu_guard_strategy = all_short
+reicast_translucent_menu_guard_max_vertices = 64
+reicast_translucent_menu_guard_risk = 5
+reicast_translucent_menu_guard_depth_tolerance = 0.01
+reicast_translucent_menu_guard_overlap = all
+reicast_translucent_menu_guard_draw_sorting = per_triangle
 ```
 
 If the guarded mode is visually correct but not fast enough, test
@@ -142,21 +164,25 @@ title's menus.
 ## Building the libretro core
 
 Use the same toolchain and platform flags as the target distribution. A
-typical ARM libretro build is:
+generic AArch64 libretro build is:
 
 ```sh
-make -C core -f Makefile platform=armv unix-armv7-hardfloat-neon
+make clean
+make platform=arm64 FORCE_GLES=1 HAVE_LTCG=0 -j$(nproc)
 ```
 
-AmberELEC integration should install this fork as a separate core, for
-example:
+For a 32-bit ARM userspace on a Cortex-A35 device:
 
-```text
-flycast2021_lowend_libretro.so
+```sh
+make clean
+make platform=classic_armv8_a35 FORCE_GLES=1 -j$(nproc)
 ```
 
-This allows users to keep the distribution's standard Flycast/Flycast 2021
-cores and select the experimental core per game.
+The Makefile produces `flycast_libretro.so`. AmberELEC performs its established
+Flycast 2021 identity and filename conversion in `package.mk`; dArkOS should
+install the unmodified identity under the filename expected by its selected
+64-bit or 32-bit frontend. A 64-bit core cannot be loaded by `retroarch32` or
+`retrorun32`, and a 32-bit core cannot be loaded by their 64-bit counterparts.
 
 ## Project status
 
