@@ -1,0 +1,6 @@
+5235522dc1ba7dd3670ec9d772b00f9050974af853087c1b59b22d10fe8ea7ad  core#hw#aica#aica.gcda
+70a881571f4d3ed2688047945b3ac5cc72acea91016d9446b009c34ee08c31c6  core#hw#aica#aica_if.gcda
+cbae1ee10e78c37bf01bf28cf02a6ef60ff153df102ca338a34938f2d1fc9c78  core#hw#aica#aica_mem.gcda
+77b3b08699b32f10de1a42577c513a7e4bd04e474dd979eb1d6d35bc044bdb00  core#hw#aica#dsp.gcda
+e6a8f9981b50c8bd32b1e7181aa984b5f4b7551a4e585987ab51ab09debd28d4  core#hw#aica#dsp_arm64.gcda
+d3792e5f3fc1d63ea4ecbd0680006f49c05d4b8467b6846444988ec0c97b0049  core#hw#aica#sgc_if.gcda

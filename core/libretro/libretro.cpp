@@ -9,6 +9,10 @@
 #include <sys/time.h>
 #endif
 
+#if defined(FLYCAST_PGO_GENERATE)
+extern "C" void __gcov_dump(void);
+#endif
+
 #ifdef HAVE_LIBNX
 #include <stdlib.h>
 #include <string.h>
@@ -329,6 +333,21 @@ void retro_init(void)
       log_cb = NULL;
    LogManager::Init((void *)log_cb);
 
+#ifndef FLYCAST_BUILD_TARGET
+#define FLYCAST_BUILD_TARGET "generic"
+#endif
+#if defined(FLYCAST_PGO_GENERATE)
+#define FLYCAST_BUILD_FLAVOR "pgo-train"
+#elif defined(FLYCAST_PGO_USE)
+#define FLYCAST_BUILD_FLAVOR "pgo-optimized"
+#elif defined(FLYCAST_LOWEND_PROFILING)
+#define FLYCAST_BUILD_FLAVOR "timing-profile"
+#else
+#define FLYCAST_BUILD_FLAVOR "release"
+#endif
+   NOTICE_LOG(COMMON, "Build target: %s, flavor: %s",
+         FLYCAST_BUILD_TARGET, FLYCAST_BUILD_FLAVOR);
+
    if (environ_cb(RETRO_ENVIRONMENT_GET_PERF_INTERFACE, &perf_cb))
       perf_get_cpu_features_cb = perf_cb.get_cpu_features;
    else
@@ -360,6 +379,11 @@ void retro_deinit(void)
    mtx_serialization.unlock();
 
    libretro_supports_bitmasks = false;
+#if defined(FLYCAST_PGO_GENERATE)
+   // RetroRun deliberately uses _Exit for this legacy core to avoid faulty
+   // ELF finalizers. Flush GCC profiles here because _Exit skips them.
+   __gcov_dump();
+#endif
    LogManager::Shutdown();
 }
 

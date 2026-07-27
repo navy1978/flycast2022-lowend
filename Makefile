@@ -24,6 +24,8 @@ HAVE_CDROM    := 0
 ENABLE_MODEM  := 1
 LOWEND_PROFILING ?= 0
 LOWEND_TEXTURE_SUBIMAGE ?= 1
+PGO_PROFILE_DIR ?=
+PGO_FILTER_FILES ?=
 
 TARGET_NAME   := flycast
 
@@ -433,6 +435,34 @@ else ifeq ($(platform), odroidc4)
 	HAVE_GENERIC_JIT = 0
 	HAVE_VULKAN = 0
 	HAVE_LTCG = 0
+
+#######################################
+
+# ARM64 Rockchip RK3566 (Cortex-A55)
+else ifneq (,$(filter RK3566 rk3566,$(platform)))
+	EXT ?= so
+	TARGET := $(TARGET_NAME)_libretro.$(EXT)
+	SHARED += -shared -Wl,--version-script=link.T
+	fpic = -fPIC
+	LIBS += -lrt
+	ARM_FLOAT_ABI_HARD = 0
+	FORCE_GLES = 1
+	SINGLE_PREC_FLAGS = 1
+	HAVE_LTCG = 0
+	HAVE_OPENMP = 1
+	CFLAGS += -Ofast \
+		-fuse-linker-plugin \
+		-fno-stack-protector -fno-ident -fomit-frame-pointer \
+		-fmerge-all-constants -ffast-math -funroll-all-loops \
+		-mcpu=cortex-a55 -mtune=cortex-a55
+	CXXFLAGS += $(CFLAGS)
+	CXXFLAGS += -DFLYCAST_BUILD_TARGET=\"RK3566-cortex-a55\"
+	LDFLAGS += -mcpu=cortex-a55 -mtune=cortex-a55 -Ofast
+	PLATFORM_EXT := unix
+	WITH_DYNAREC = arm64
+	HAVE_GENERIC_JIT = 0
+	HAVE_VULKAN = 0
+	CORE_DEFINES += -DLOW_END -DLOW_RES
 
 #######################################
 
@@ -1148,14 +1178,27 @@ ifneq (,$(findstring arm, $(ARCH)))
 endif
 
 ifeq ($(PGO_MAKE),1)
-	CFLAGS += -fprofile-generate -pg
+	CFLAGS += -fprofile-generate -fprofile-update=atomic -DFLYCAST_PGO_GENERATE
 	LDFLAGS += -fprofile-generate
+ifneq ($(strip $(PGO_PROFILE_DIR)),)
+	CFLAGS += -fprofile-dir=$(PGO_PROFILE_DIR)
+	LDFLAGS += -fprofile-dir=$(PGO_PROFILE_DIR)
+endif
+ifneq ($(strip $(PGO_FILTER_FILES)),)
+	CFLAGS += -fprofile-filter-files='$(PGO_FILTER_FILES)'
+endif
 else
 	CFLAGS += -fomit-frame-pointer
 endif
 
 ifeq ($(PGO_USE),1)
-	CFLAGS += -fprofile-use
+	CFLAGS += -fprofile-use -fprofile-correction -DFLYCAST_PGO_USE
+ifneq ($(strip $(PGO_PROFILE_DIR)),)
+	CFLAGS += -fprofile-dir=$(PGO_PROFILE_DIR)
+endif
+ifneq ($(strip $(PGO_FILTER_FILES)),)
+	CFLAGS += -fprofile-filter-files='$(PGO_FILTER_FILES)'
+endif
 endif
 
 ifeq ($(LTO_TEST),1)
@@ -1200,3 +1243,7 @@ endif
 
 clean:
 	rm -f $(OBJECTS) $(TARGET)
+
+.PHONY: rk3566-pgo
+rk3566-pgo:
+	JOBS="$(if $(JOBS),$(JOBS),4)" ./tools/build-rk3566-pgo.sh

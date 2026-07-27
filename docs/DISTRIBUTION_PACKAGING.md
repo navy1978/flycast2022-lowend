@@ -85,6 +85,18 @@ Keep the libretro library name as `Flycast`. The distribution may copy or
 rename `flycast_libretro.so` to the core filename selected by EmulationStation;
 that packaging filename does not alter the option prefix.
 
+The source repository for this low-end core is:
+
+```text
+https://github.com/navy1978/flycast2022-lowend
+```
+
+This fork already reports rumble through the standard libretro rumble
+interface. RetroRun handles the device-specific PWM/event output, so dArkOS
+does not need to patch Flycast with direct `/sys/class/pwm` shell commands.
+If the launcher expects `flycast_rumble_libretro.so`, packaging may install
+the same built core under that filename.
+
 RetroRun audio threading is a frontend setting, not a Flycast core option:
 
 ```text
@@ -100,6 +112,51 @@ Build the core for the ABI of the frontend that loads it:
 - 32-bit ARM for `retroarch32` or `retrorun32`.
 
 Do not reuse an AArch64 binary in a 32-bit core slot or the inverse.
+
+For the 64-bit RK3566 devices, use a clean, deterministic build:
+
+```sh
+make clean
+make platform=RK3566 FORCE_GLES=1 HAVE_OPENMP=1 HAVE_LTCG=0 -j$(nproc)
+```
+
+For the validated PGO-AICA build, use the bundled, path-independent profile
+wrapper instead:
+
+```sh
+make rk3566-pgo JOBS="$(nproc)"
+```
+
+This command verifies the six versioned profiles, stages them for the current
+absolute checkout path, performs a clean RK3566/Cortex-A55 build and produces
+`flycast_libretro.so`. It requires GCC 9.x because GCC execution profiles are
+compiler-version-specific. The startup log must additionally contain:
+
+```text
+flavor: pgo-optimized
+```
+
+ArkOS/dArkOS must not run the training core and does not need a Sonic ROM.
+The repository contains only compiler execution counters. Packaging may
+install the resulting core as `flycast_rumble_libretro.so`, while preserving
+the `reicast_*` option prefix and `Flycast` library name.
+
+Use the same command after applying any rumble patch. In particular, do not
+incrementally rebuild a previous `platform=RK3566` object tree with
+`platform=goadvance`: Make does not track changed platform flags in object
+filenames, so that produces a hybrid binary. The startup log must contain:
+
+```text
+Build target: RK3566-cortex-a55
+```
+
+An RG353M comparison using a 30-second warm-up and 90-second measurement found
+47.287 FPS with this target versus 41.886 FPS with the generic ARM64 target in
+Sonic Adventure 2 (`+12.9%`). Soul Calibur reached 58.860 FPS with the current
+RetroRun catalog profile. The bundled AICA profile raises Sonic from 47.380
+to 50.913 FPS (+7.46%) without a measurable Soul Calibur regression. From the
+same combat save-state, Dead or Alive 2 reaches 43.685 FPS versus 36.620 FPS
+for the original dArkOS stack and distribution configuration (+19.3%).
 
 ## Adding another distribution
 

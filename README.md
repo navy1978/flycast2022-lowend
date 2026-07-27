@@ -309,6 +309,31 @@ make clean
 make platform=arm64 FORCE_GLES=1 HAVE_LTCG=0 -j$(nproc)
 ```
 
+For dArkOS on RK3566 devices such as RG353M, use the Cortex-A55 target:
+
+```sh
+make clean
+make platform=RK3566 FORCE_GLES=1 HAVE_OPENMP=1 HAVE_LTCG=0 -j$(nproc)
+```
+
+The validated GCC 9.x AICA profile is bundled for reproducible distribution
+builds:
+
+```sh
+make rk3566-pgo JOBS="$(nproc)"
+```
+
+This produces the tested `pgo-optimized` RK3566 core without requiring a game
+ROM or a training run on the distribution builder. See the
+[distribution packaging guide](docs/DISTRIBUTION_PACKAGING.md) for the dArkOS
+installation name and compatibility requirements.
+
+Do not substitute `platform=arm64` for an RK3566 release. On an RG353M,
+the RK3566 build improved Sonic Adventure 2 from 41.886 to 47.287 FPS
+(`+12.9%`) in the same 90-second benchmark. The core logs
+`Build target: RK3566-cortex-a55` at startup, so a distribution can verify
+that the intended binary is actually running.
+
 For a 32-bit ARM userspace on a Cortex-A35 device:
 
 ```sh
