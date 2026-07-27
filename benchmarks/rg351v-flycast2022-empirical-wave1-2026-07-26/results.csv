@@ -1,0 +1,9 @@
+variant,runs,mean_fps,mean_duration_s,mean_core_ms,mean_video_ms,mean_active_p95_ms,mean_active_p99_ms,paired_fps_delta_pct,decision
+baseline_full,5,23.2683,25.787,25.973,16.994,56.425,62.804,,reference
+discard_transient,3,23.3990,25.645,25.733,16.996,56.057,63.188,0.43,reject_neutral
+direct_lds_fpscr,3,23.5034,25.528,25.574,16.962,55.870,60.872,0.79,retain_experimental_default_off
+a35_tuned,1,23.2648,25.790,25.956,17.016,55.642,63.546,0.16,reject_neutral
+a35_discard,1,23.3645,25.680,25.797,16.990,55.819,61.874,0.59,reject_neutral
+sh4_timeslice_896,1,23.2964,25.755,25.920,16.993,56.447,60.742,-0.10,reject_neutral
+aica_arm_batch_2,1,23.5137,25.517,25.557,16.960,55.323,61.700,0.83,reject_no_scaling_and_timing_risk
+aica_arm_batch_4,1,23.2567,25.799,25.990,16.997,56.122,61.252,-0.27,reject_slower_and_timing_risk

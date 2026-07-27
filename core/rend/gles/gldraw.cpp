@@ -1,4 +1,9 @@
 #include "gles.h"
+#include "lowend_profiler.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
 
 /*
 
@@ -106,10 +111,255 @@ static bool UsePerTriangleTranslucentSorting()
 				&& settings.rend.TranslucentMenuGuardDrawSorting == 1);
 }
 
+struct FastDepthGuardState
+{
+	u64 frame_index;
+	u64 previous_signature;
+	u32 repeat_streak;
+	u32 frame_mode;
+};
+
+static FastDepthGuardState fast_depth_guard = {};
+
+static u64 FastDepthHashWord(u64 hash, u32 value)
+{
+	hash ^= value;
+	return hash * 1099511628211ULL;
+}
+
+static u32 FastDepthFloatBits(float value)
+{
+	u32 bits;
+	std::memcpy(&bits, &value, sizeof(bits));
+	return bits;
+}
+
+static u64 FastDepthSceneSignature()
+{
+	u64 hash = 1469598103934665603ULL;
+	hash = FastDepthHashWord(hash, pvrrc.global_param_op.used());
+	hash = FastDepthHashWord(hash, pvrrc.global_param_pt.used());
+	hash = FastDepthHashWord(hash, pvrrc.global_param_tr.used());
+	hash = FastDepthHashWord(hash, pvrrc.verts.used());
+
+	// A full vertex hash would waste CPU on the hardware this mode targets.
+	// Ninety-six evenly distributed positions are enough to distinguish
+	// moving gameplay from the byte-stable geometry emitted while SA2 is
+	// paused. Three consecutive matching frames are required so a 30-FPS
+	// game that repeats each frame once is not mistaken for a pause.
+	const u32 vertex_count = pvrrc.verts.used();
+	if (vertex_count != 0)
+	{
+		const Vertex *vertices = pvrrc.verts.head();
+		const u32 stride = std::max(1u, vertex_count / 96u);
+		for (u32 i = 0; i < vertex_count; i += stride)
+		{
+			hash = FastDepthHashWord(hash, FastDepthFloatBits(vertices[i].x));
+			hash = FastDepthHashWord(hash, FastDepthFloatBits(vertices[i].y));
+			hash = FastDepthHashWord(hash, FastDepthFloatBits(vertices[i].z));
+		}
+		const Vertex& last = vertices[vertex_count - 1];
+		hash = FastDepthHashWord(hash, FastDepthFloatBits(last.x));
+		hash = FastDepthHashWord(hash, FastDepthFloatBits(last.y));
+		hash = FastDepthHashWord(hash, FastDepthFloatBits(last.z));
+	}
+	return hash;
+}
+
+struct FastDepthFontCluster
+{
+	u32 texture_address;
+	u16 height_bin;
+	s16 line_bin;
+	u16 glyphs;
+};
+
+static void FindFontGlyphs(const List<PolyParam>& list,
+		FastDepthFontCluster *clusters, u32& cluster_count,
+		u32 cluster_capacity)
+{
+	const u32 *indices = pvrrc.idx.head();
+	const Vertex *vertices = pvrrc.verts.head();
+	for (u32 poly_index = 0; poly_index < list.used(); ++poly_index)
+	{
+		const PolyParam& poly = list.head()[poly_index];
+		if (!poly.pcw.Texture || poly.count < 4 || poly.count > 8
+				|| poly.first >= pvrrc.idx.used()
+				|| poly.count > pvrrc.idx.used() - poly.first)
+			continue;
+
+		float min_x = 1e30f;
+		float max_x = -1e30f;
+		float min_y = 1e30f;
+		float max_y = -1e30f;
+		float min_z = 1e30f;
+		float max_z = -1e30f;
+		u32 corner_vertices = 0;
+		bool valid = true;
+		for (u32 i = 0; i < poly.count; ++i)
+		{
+			const u32 vertex_index = indices[poly.first + i];
+			if (vertex_index >= pvrrc.verts.used())
+			{
+				valid = false;
+				break;
+			}
+			const Vertex& vertex = vertices[vertex_index];
+			min_x = std::min(min_x, vertex.x);
+			max_x = std::max(max_x, vertex.x);
+			min_y = std::min(min_y, vertex.y);
+			max_y = std::max(max_y, vertex.y);
+			min_z = std::min(min_z, vertex.z);
+			max_z = std::max(max_z, vertex.z);
+		}
+		const float width = max_x - min_x;
+		const float height = max_y - min_y;
+		if (!valid || width < 2.f || width > 128.f
+				|| height < 5.f || height > 96.f
+				|| width > height * 2.5f)
+			continue;
+		const float z_scale = std::max(1.f,
+				std::max(std::abs(min_z), std::abs(max_z)));
+		if (max_z - min_z > z_scale * 0.0015f)
+			continue;
+
+		const float x_tolerance = std::max(1.f, width * 0.025f);
+		const float y_tolerance = std::max(1.f, height * 0.025f);
+		for (u32 i = 0; i < poly.count; ++i)
+		{
+			const Vertex& vertex = vertices[indices[poly.first + i]];
+			const bool aligned_x = std::abs(vertex.x - min_x) <= x_tolerance
+					|| std::abs(vertex.x - max_x) <= x_tolerance;
+			const bool aligned_y = std::abs(vertex.y - min_y) <= y_tolerance
+					|| std::abs(vertex.y - max_y) <= y_tolerance;
+			corner_vertices += aligned_x && aligned_y;
+		}
+		if (corner_vertices * 5 < poly.count * 4)
+			continue;
+
+		const u16 height_bin = (u16)std::min(65535L,
+				std::max(0L, std::lround(height / 4.f)));
+		const s16 line_bin = (s16)std::max(-32768L,
+				std::min(32767L, std::lround((min_y + max_y) / 24.f)));
+		u32 cluster_index = 0;
+		for (; cluster_index < cluster_count; ++cluster_index)
+		{
+			FastDepthFontCluster& cluster = clusters[cluster_index];
+			if (cluster.texture_address == poly.tcw.TexAddr
+					&& cluster.height_bin == height_bin
+					&& cluster.line_bin == line_bin)
+			{
+				++cluster.glyphs;
+				break;
+			}
+		}
+		if (cluster_index == cluster_count
+				&& cluster_count < cluster_capacity)
+		{
+			FastDepthFontCluster& cluster = clusters[cluster_count++];
+			cluster.texture_address = poly.tcw.TexAddr;
+			cluster.height_bin = height_bin;
+			cluster.line_bin = line_bin;
+			cluster.glyphs = 1;
+		}
+	}
+}
+
+static u32 CountFontLikeGlyphs()
+{
+	FastDepthFontCluster clusters[64] = {};
+	u32 cluster_count = 0;
+	FindFontGlyphs(pvrrc.global_param_op, clusters, cluster_count, 64);
+	FindFontGlyphs(pvrrc.global_param_pt, clusters, cluster_count, 64);
+	FindFontGlyphs(pvrrc.global_param_tr, clusters, cluster_count, 64);
+
+	u32 glyphs = 0;
+	u32 largest_line = 0;
+	for (u32 i = 0; i < cluster_count; ++i)
+	{
+		largest_line = std::max(largest_line, (u32)clusters[i].glyphs);
+		if (clusters[i].glyphs >= 5)
+			glyphs += clusters[i].glyphs;
+	}
+	// Normal gameplay HUD counters stay below this threshold. A real menu has
+	// several words or choices made of repeated glyph quads from one atlas.
+	return glyphs >= 24 && largest_line >= 6 ? glyphs : 0;
+}
+
+static void UpdateFastDepthGuard()
+{
+	if (settings.rend.FastDepth < 4)
+		return;
+
+	++fast_depth_guard.frame_index;
+	const u32 poly_count = pvrrc.global_param_op.used()
+			+ pvrrc.global_param_pt.used()
+			+ pvrrc.global_param_tr.used();
+	const u64 signature = FastDepthSceneSignature();
+	if (fast_depth_guard.frame_index > 1
+			&& signature == fast_depth_guard.previous_signature)
+		++fast_depth_guard.repeat_streak;
+	else
+		fast_depth_guard.repeat_streak = 0;
+	fast_depth_guard.previous_signature = signature;
+
+	const bool simple_menu_frame = poly_count <= 180;
+	// Font-like particles and billboard chains occur in normal gameplay too.
+	// Only use the glyph signal for interface-sized scenes: richer than the
+	// simple title menu, but far below the polygon load of an active SA2 level.
+	const u32 font_glyphs = poly_count > 180 && poly_count <= 900
+			? CountFontLikeGlyphs() : 0;
+	const bool font_menu_frame = font_glyphs != 0;
+	const bool menu_frame = simple_menu_frame || font_menu_frame;
+	const bool pause_frame = !menu_frame
+			&& fast_depth_guard.repeat_streak >= 2;
+	fast_depth_guard.frame_mode = menu_frame || pause_frame ? 0 : 3;
+}
+
+static bool ShadowReceiverHasDepthVariation(const PolyParam *poly,
+		float ratio)
+{
+	if (poly == nullptr || !poly->pcw.Shadow || poly->count < 3
+			|| poly->first >= pvrrc.idx.used()
+			|| poly->count > pvrrc.idx.used() - poly->first)
+		return false;
+
+	const u32 *indices = pvrrc.idx.head();
+	const Vertex *vertices = pvrrc.verts.head();
+	float min_z = 1e30f;
+	float max_z = 0.f;
+	for (u32 i = 0; i < poly->count; ++i)
+	{
+		const u32 vertex_index = indices[poly->first + i];
+		if (vertex_index >= pvrrc.verts.used())
+			return true;
+		const float z = std::abs(vertices[vertex_index].z);
+		if (!std::isfinite(z) || z <= 0.f)
+			return true;
+		min_z = std::min(min_z, z);
+		max_z = std::max(max_z, z);
+	}
+	return max_z > min_z * ratio;
+}
+
+static u32 SelectFastDepthMode(const PolyParam *poly, u32 list_type)
+{
+	if (settings.rend.FastDepth < 4)
+		return std::min(settings.rend.FastDepth, 3u);
+	if (fast_depth_guard.frame_mode == 0)
+		return 0;
+	if (settings.rend.FastDepth == 5
+			&& list_type == ListType_Opaque
+			&& ShadowReceiverHasDepthVariation(poly, 4.f))
+		return 0;
+	return fast_depth_guard.frame_mode;
+}
+
 template <u32 Type, bool SortingEnabled>
 __forceinline
-	void SetGPState(const PolyParam* gp,u32 cflip=0)
+	void SetGPState(const PolyParam* gp, u32 fast_depth, u32 cflip=0)
 {
+	LOWEND_PROFILE_SAMPLED_SCOPE(RendererState, 16);
 	if (gp->pcw.Texture && gp->tsp.FilterMode > 1 && Type != ListType_Punch_Through && gp->tcw.MipMapped == 1)
 	{
 		ShaderUniforms.trilinear_alpha = 0.25 * (gp->tsp.MipMapD & 0x3);
@@ -139,7 +389,8 @@ __forceinline
 								  gp->tcw.PixelFmt == PixelBumpMap,
 								  color_clamp,
 								  ShaderUniforms.trilinear_alpha != 1.f,
-								  palette);
+								  palette,
+								  fast_depth);
 
 	glcache.UseProgram(CurrentShader->program);
 	if (CurrentShader->trilinear_alpha != -1)
@@ -272,17 +523,29 @@ static void DrawList(const List<PolyParam>& gply, int first, int count)
 	glcache.StencilOp(GL_KEEP,GL_KEEP,GL_REPLACE);
 
 	const PolyParam *active_state = NULL;
+	u32 active_fast_depth = ~0u;
 	while(count-->0)
 	{
 		if (params->count>2) /* this actually happens for some games. No idea why .. */
 		{
+			const u32 fast_depth = SelectFastDepthMode(params, Type);
 			if (!settings.rend.AdjacentStateElision
 					|| active_state == NULL
-					|| !SamePolyState(*active_state, *params))
+					|| !SamePolyState(*active_state, *params)
+					|| active_fast_depth != fast_depth)
 			{
-				SetGPState<Type,SortingEnabled>(params);
+				SetGPState<Type,SortingEnabled>(params, fast_depth);
 				active_state = params;
+				active_fast_depth = fast_depth;
 			}
+			LOWEND_PROFILE_COUNT(DrawSubmit, 1);
+#if defined(FLYCAST_LOWEND_PROFILING)
+			lowend_profile_count(Type == ListType_Opaque
+					? LowendProfileStage::DrawOpaque
+					: Type == ListType_Punch_Through
+							? LowendProfileStage::DrawPunchThrough
+							: LowendProfileStage::DrawTranslucent);
+#endif
 			glDrawElements(GL_TRIANGLE_STRIP, params->count, gl.index_type,
 						(GLvoid*)(gl.get_index_size() * params->first));
 		}
@@ -338,7 +601,9 @@ void DrawSorted(bool multipass)
 				const PolyParam* params = pidx_sort[p].ppid;
 				if (pidx_sort[p].count>2) //this actually happens for some games. No idea why ..
 				{
-					SetGPState<ListType_Translucent, true>(params);
+					SetGPState<ListType_Translucent, true>(params,
+							SelectFastDepthMode(params, ListType_Translucent));
+					LOWEND_PROFILE_COUNT(DrawSubmit, 1);
 					glDrawElements(GL_TRIANGLES, pidx_sort[p].count, gl.index_type,
 						(GLvoid*)(gl.get_index_size() * pidx_sort[p].first));
 				}
@@ -369,6 +634,7 @@ void DrawSorted(bool multipass)
 
 						SetCull(params->isp.CullMode ^ gcflip);
 
+						LOWEND_PROFILE_COUNT(DrawSubmit, 1);
 						glDrawElements(GL_TRIANGLES, pidx_sort[p].count, gl.index_type,
 							(GLvoid*)(gl.get_index_size() * pidx_sort[p].first));
 					}
@@ -556,12 +822,14 @@ static void DrawModVols(int first, int count)
 			SetMVS_Mode(Or, param.isp);		// OR'ing (open volume or quad)
 		else
 			SetMVS_Mode(Xor, param.isp);	// XOR'ing (closed volume)
+		LOWEND_PROFILE_COUNT(DrawSubmit, 1);
 		glDrawArrays(GL_TRIANGLES, param.first * 3, param.count * 3);
 
 		if (mv_mode == 1 || mv_mode == 2)
 		{
 			// Sum the area
 			SetMVS_Mode(mv_mode == 1 ? Inclusion : Exclusion, param.isp);
+			LOWEND_PROFILE_COUNT(DrawSubmit, 1);
 			glDrawArrays(GL_TRIANGLES, mod_base * 3, (param.first + param.count - mod_base) * 3);
 			mod_base = -1;
 		}
@@ -586,6 +854,7 @@ static void DrawModVols(int first, int count)
 	glcache.Disable(GL_DEPTH_TEST);
 
 	SetupMainVBO();
+	LOWEND_PROFILE_COUNT(DrawSubmit, 1);
 	glDrawArrays(GL_TRIANGLE_STRIP,0,4);
 
 	//restore states
@@ -594,6 +863,8 @@ static void DrawModVols(int first, int count)
 
 void DrawStrips()
 {
+	LOWEND_PROFILE_SCOPE_NO_COUNT(DrawSubmit);
+	UpdateFastDepthGuard();
 	SetupMainVBO();
 	//Draw the strips !
 
@@ -671,7 +942,9 @@ static void DrawQuad(GLuint texId, float x, float y, float w, float h, float u0,
 
 	ShaderUniforms.trilinear_alpha = 1.0;
 
-	PipelineShader *shader = GetProgram(false, false, true, false, true, 0, false, 2, false, false, false, false, false);
+	PipelineShader *shader = GetProgram(false, false, true, false, true, 0,
+			false, 2, false, false, false, false, false,
+			settings.rend.FastDepth >= 4 ? 3 : settings.rend.FastDepth);
 	glcache.UseProgram(shader->program);
 
 	glActiveTexture(GL_TEXTURE0);
@@ -681,6 +954,7 @@ static void DrawQuad(GLuint texId, float x, float y, float w, float h, float u0,
 	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STREAM_DRAW);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STREAM_DRAW);
 
+	LOWEND_PROFILE_COUNT(DrawSubmit, 1);
 	glDrawElements(GL_TRIANGLE_STRIP, 5, GL_UNSIGNED_SHORT, (void *)0);
 }
 
@@ -802,7 +1076,9 @@ void DrawVmuTexture(u8 vmu_screen_number)
 	glcache.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 	SetupMainVBO();
-	PipelineShader *shader = GetProgram(0, false, 1, 1, 0, 0, 0, 2, false, false, false, false, false);
+	PipelineShader *shader = GetProgram(0, false, 1, 1, 0, 0, 0, 2,
+			false, false, false, false, false,
+			settings.rend.FastDepth >= 4 ? 3 : settings.rend.FastDepth);
 	glcache.UseProgram(shader->program);
 
 	{
@@ -818,6 +1094,7 @@ void DrawVmuTexture(u8 vmu_screen_number)
 		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STREAM_DRAW);
 	}
 
+	LOWEND_PROFILE_COUNT(DrawSubmit, 1);
 	glDrawElements(GL_TRIANGLE_STRIP, 5, GL_UNSIGNED_SHORT, (void *)0);
 }
 
@@ -896,7 +1173,9 @@ void DrawGunCrosshair(u8 port)
 	glcache.BlendFunc(GL_SRC_ALPHA, GL_ONE);
 
 	SetupMainVBO();
-	PipelineShader *shader = GetProgram(0, false, 1, 1, 0, 0, 0, 2, false, false, false, false, false);
+	PipelineShader *shader = GetProgram(0, false, 1, 1, 0, 0, 0, 2,
+			false, false, false, false, false,
+			settings.rend.FastDepth >= 4 ? 3 : settings.rend.FastDepth);
 	glcache.UseProgram(shader->program);
 
 	{
@@ -912,6 +1191,7 @@ void DrawGunCrosshair(u8 port)
 		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STREAM_DRAW);
 	}
 
+	LOWEND_PROFILE_COUNT(DrawSubmit, 1);
 	glDrawElements(GL_TRIANGLE_STRIP, 5, GL_UNSIGNED_SHORT, (void *)0);
 
 	glcache.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);

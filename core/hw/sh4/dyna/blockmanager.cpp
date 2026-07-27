@@ -12,6 +12,7 @@
 #include "../sh4_core.h"
 #include "hw/sh4/sh4_mem.h"
 #include "hw/sh4/sh4_sched.h"
+#include "lowend_profiler.h"
 
 
 #if defined(__unix__) && defined(DYNA_OPROF)
@@ -165,6 +166,7 @@ RuntimeBlockInfoPtr bm_GetStaleBlock(void* dynarec_code)
 
 void bm_AddBlock(RuntimeBlockInfo* blk)
 {
+	LOWEND_DYNAREC_ADD(BlocksAdded, 1);
 	RuntimeBlockInfoPtr block(blk);
 	if (block->temp_block)
 		all_temp_blocks.insert(block);
@@ -196,6 +198,7 @@ void bm_AddBlock(RuntimeBlockInfo* blk)
 
 void bm_DiscardBlock(RuntimeBlockInfo* block)
 {
+	LOWEND_DYNAREC_ADD(BlocksDiscarded, 1);
 	// Remove from block map
 	auto it = blkmap.find((void*)block->code);
 	verify(it != blkmap.end());
@@ -759,4 +762,3 @@ void print_blocks()
 }
 #endif
 #endif
-

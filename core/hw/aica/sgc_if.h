@@ -3,6 +3,7 @@
 
 void AICA_Sample();
 void AICA_Sample32();
+void AICA_SampleLowend32();
 
 //u32 ReadChannelReg(u32 channel,u32 reg);
 void WriteChannelReg(u32 channel, u32 reg, int size);

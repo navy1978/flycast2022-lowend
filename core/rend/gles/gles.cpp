@@ -14,7 +14,6 @@
 #ifndef GL_MINOR_VERSION
 #define GL_MINOR_VERSION                  0x821C
 #endif
-
 GLCache glcache;
 gl_ctx gl;
 
@@ -29,6 +28,7 @@ float fb_scale_x, fb_scale_y;
 static const char* VertexShaderSource = R"(%s
 #define TARGET_GL %s
 #define pp_Gouraud %d
+#define pp_FastDepth %d
 
 #define GLES2 0
 #define GLES3 1
@@ -70,7 +70,7 @@ in mediump vec2  in_uv;
 INTERPOLATION out lowp vec4 vtx_base;
 INTERPOLATION out lowp vec4 vtx_offs;
               out mediump vec2 vtx_uv;
-#if TARGET_GL == GLES2
+#if TARGET_GL == GLES2 || pp_FastDepth != 0
               out highp float fog_depth;
 #endif 
 
@@ -81,11 +81,36 @@ void main()
 	vtx_uv = in_uv;
 	highp vec4 vpos = normal_matrix * in_pos;
 	vpos.w = 1.0 / vpos.z;
-#if TARGET_GL != GLES2
+#if TARGET_GL != GLES2 && pp_FastDepth == 0
    vpos.z = vpos.w;
 #else
    fog_depth = vpos.z * sp_FOG_DENSITY;
+#if pp_FastDepth == 2
+   // Approximate the accurate per-fragment logarithmic depth by evaluating
+   // it per vertex. Convert the desired [0, 1] window depth back to clip
+   // space so fixed-function interpolation produces the depth value.
+   highp float log_depth = log2(1.0 + vpos.z * 100000.0) / 34.0;
+   vpos.z = (2.0 * log_depth - 1.0) * vpos.w;
+#elif pp_FastDepth == 3
+   // Fast GLES3 log2 approximation. Extract the IEEE-754 exponent and
+   // mantissa and approximate log2(1 + m) with a quadratic. This avoids a
+   // transcendental instruction per vertex while retaining a stable,
+   // monotonic logarithmic depth mapping.
+#if TARGET_GL == GLES3
+   highp float depth_input = 1.0 + vpos.z * 100000.0;
+   highp uint depth_bits = floatBitsToUint(depth_input);
+   highp float depth_exp = float((depth_bits >> 23u) & 255u) - 127.0;
+   highp float depth_mant = float(depth_bits & 0x7fffffu) / 8388608.0;
+   highp float fast_log2 = depth_exp
+      + depth_mant * (1.3465558 - 0.3465558 * depth_mant);
+   highp float log_depth = fast_log2 / 34.0;
+#else
+   highp float log_depth = log2(1.0 + vpos.z * 100000.0) / 34.0;
+#endif
+   vpos.z = (2.0 * log_depth - 1.0) * vpos.w;
+#else
    vpos.z=depth_scale.x+depth_scale.y*vpos.w; 
+#endif
 #endif
 	vpos.xy *= vpos.w;
 	gl_Position = vpos;
@@ -95,6 +120,7 @@ void main()
 const char* PixelPipelineShader =
 R"(%s
 #define TARGET_GL %s
+#define pp_FastDepth %d
 
 #define cp_AlphaTest %d
 #define pp_ClipInside %d
@@ -163,13 +189,13 @@ uniform mediump int palette_index;
 INTERPOLATION in lowp vec4 vtx_base;
 INTERPOLATION in lowp vec4 vtx_offs;
 in mediump vec2 vtx_uv;
-#if TARGET_GL == GLES2
+#if TARGET_GL == GLES2 || pp_FastDepth != 0
 in highp float fog_depth;
 #endif
 
 lowp float fog_mode2(highp float w)
 {
-#if TARGET_GL == GLES2
+#if TARGET_GL == GLES2 || pp_FastDepth != 0
 	highp float z = clamp(fog_depth, 1.0, 255.9999);
 #else
 	highp float z = clamp(w * sp_FOG_DENSITY, 1.0, 255.9999);
@@ -290,7 +316,7 @@ void main()
 		color.a=1.0;
 	#endif 
 	//color.rgb=vec3(gl_FragCoord.w * sp_FOG_DENSITY / 128.0);
-#if TARGET_GL != GLES2
+#if TARGET_GL != GLES2 && pp_FastDepth == 0
 	highp float w = gl_FragCoord.w * 100000.0;
 	gl_FragDepth = log2(1.0 + w) / 34.0;
 #endif
@@ -301,6 +327,7 @@ void main()
 static const char* ModifierVolumeShader = 
 R"(%s
 #define TARGET_GL %s
+#define pp_FastDepth %d
 
 #define GLES2 0
 #define GLES3 1
@@ -321,7 +348,7 @@ uniform lowp float sp_ShaderColor;
 /* Vertex input*/
 void main()
 {
-#if TARGET_GL != GLES2
+#if TARGET_GL != GLES2 && pp_FastDepth == 0
    highp float w = gl_FragCoord.w * 100000.0;
    gl_FragDepth = log2(1.0 + w) / 34.0;
 #endif
@@ -340,8 +367,9 @@ glm::mat4 ViewportMatrix;
 PipelineShader *GetProgram(bool cp_AlphaTest, bool pp_InsideClipping,
 		bool pp_Texture, bool pp_UseAlpha, bool pp_IgnoreTexA, u32 pp_ShadInstr, bool pp_Offset,
 		u32 pp_FogCtrl, bool pp_Gouraud, bool pp_BumpMap, bool fog_clamping, bool trilinear,
-		bool palette)
+		bool palette, u32 fast_depth)
 {
+	verify(fast_depth <= 3);
 	u32 rv=0;
 
 	rv |= pp_InsideClipping;
@@ -357,6 +385,7 @@ PipelineShader *GetProgram(bool cp_AlphaTest, bool pp_InsideClipping,
 	rv<<=1; rv|=fog_clamping;
 	rv<<=1; rv|=trilinear;
 	rv<<=1; rv|=palette;
+	rv<<=2; rv|=fast_depth;
 
 	PipelineShader *shader = &gl.shaders[rv];
 	if (shader->program == 0)
@@ -374,6 +403,7 @@ PipelineShader *GetProgram(bool cp_AlphaTest, bool pp_InsideClipping,
 		shader->fog_clamping = fog_clamping;
 		shader->trilinear = trilinear;
 		shader->palette = palette;
+		shader->fast_depth = fast_depth;
 		CompilePipelineShader(shader);
 	}
 
@@ -556,13 +586,14 @@ bool CompilePipelineShader(	PipelineShader* s)
 {
 	char vshader[8192];
 
-	int rc = sprintf(vshader, VertexShaderSource, gl.glsl_version_header, gl.gl_version, s->pp_Gouraud);
+	int rc = sprintf(vshader, VertexShaderSource, gl.glsl_version_header,
+			gl.gl_version, s->pp_Gouraud, s->fast_depth);
 	verify(rc + 1 <= (int)sizeof(vshader));
 
 	char pshader[8192];
 
 	rc = sprintf(pshader,PixelPipelineShader, gl.glsl_version_header, gl.gl_version,
-                s->cp_AlphaTest,s->pp_InsideClipping,s->pp_UseAlpha,
+				s->fast_depth, s->cp_AlphaTest,s->pp_InsideClipping,s->pp_UseAlpha,
                 s->pp_Texture,s->pp_IgnoreTexA,s->pp_ShadInstr,s->pp_Offset,s->pp_FogCtrl, s->pp_Gouraud, s->pp_BumpMap,
 				s->fog_clamping, s->trilinear, s->palette);
 	verify(rc + 1 <= (int)sizeof(pshader));
@@ -702,9 +733,13 @@ static bool gl_create_resources(void)
    findGLVersion();
 
    char vshader[8192];
-   sprintf(vshader, VertexShaderSource, gl.glsl_version_header, gl.gl_version, 1);
+   const u32 auxiliary_fast_depth =
+		   settings.rend.FastDepth >= 4 ? 3 : settings.rend.FastDepth;
+   sprintf(vshader, VertexShaderSource, gl.glsl_version_header, gl.gl_version,
+		   1, auxiliary_fast_depth);
    char fshader[8192];
-	sprintf(fshader, ModifierVolumeShader, gl.glsl_version_header, gl.gl_version);
+	sprintf(fshader, ModifierVolumeShader, gl.glsl_version_header, gl.gl_version,
+			auxiliary_fast_depth);
 
 	gl.modvol_shader.program = gl_CompileAndLink(vshader, fshader);
 	gl.modvol_shader.normal_matrix  = glGetUniformLocation(gl.modvol_shader.program, "normal_matrix");
@@ -717,8 +752,10 @@ static bool gl_create_resources(void)
 void UpdateFogTexture(u8 *fog_table, GLenum texture_slot, GLint fog_image_format)
 {
 	glActiveTexture(texture_slot);
+	bool allocate_storage = false;
 	if (fogTextureId == 0)
 	{
+		allocate_storage = true;
 		fogTextureId = glcache.GenTexture();
 		glcache.BindTexture(GL_TEXTURE_2D, fogTextureId);
 		glcache.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -733,7 +770,12 @@ void UpdateFogTexture(u8 *fog_table, GLenum texture_slot, GLint fog_image_format
 	MakeFogTexture(temp_tex_buffer);
 
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-	glTexImage2D(GL_TEXTURE_2D, 0, fog_image_format, 128, 2, 0, fog_image_format, GL_UNSIGNED_BYTE, temp_tex_buffer);
+	if (settings.rend.PaletteFogStorageReuse && !allocate_storage)
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 128, 2,
+				fog_image_format, GL_UNSIGNED_BYTE, temp_tex_buffer);
+	else
+		glTexImage2D(GL_TEXTURE_2D, 0, fog_image_format, 128, 2, 0,
+				fog_image_format, GL_UNSIGNED_BYTE, temp_tex_buffer);
 	glCheck();
 
 	glActiveTexture(GL_TEXTURE0);
@@ -742,8 +784,10 @@ void UpdateFogTexture(u8 *fog_table, GLenum texture_slot, GLint fog_image_format
 void UpdatePaletteTexture(GLenum texture_slot)
 {
 	glActiveTexture(texture_slot);
+	bool allocate_storage = false;
 	if (paletteTextureId == 0)
 	{
+		allocate_storage = true;
 		paletteTextureId = glcache.GenTexture();
 		glcache.BindTexture(GL_TEXTURE_2D, paletteTextureId);
 		glcache.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -755,7 +799,12 @@ void UpdatePaletteTexture(GLenum texture_slot)
 		glcache.BindTexture(GL_TEXTURE_2D, paletteTextureId);
 
    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1024, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, palette32_ram);
+	if (settings.rend.PaletteFogStorageReuse && !allocate_storage)
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1024, 1,
+				GL_RGBA, GL_UNSIGNED_BYTE, palette32_ram);
+	else
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1024, 1, 0, GL_RGBA,
+				GL_UNSIGNED_BYTE, palette32_ram);
 	glCheck();
 
 	glActiveTexture(GL_TEXTURE0);

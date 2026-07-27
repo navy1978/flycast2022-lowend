@@ -5,6 +5,7 @@
 #include "hw/holly/holly_intc.h"
 #include "hw/holly/sb.h"
 #include "hw/sh4/sh4_sched.h"
+#include "lowend_profiler.h"
 
 #define SH4_IRQ_BIT (1 << (holly_SPU_IRQ & 31))
 
@@ -88,9 +89,15 @@ const int AICA_TICK = 145125;	// 44.1 KHz / 32
 
 static int AicaUpdate(int tag, int c, int j)
 {
-   aicaarm::run(32);
+	LOWEND_PROFILE_SCOPE(AICAUpdate);
+	aicaarm::run(settings.aica.ArmCyclesPerSample);
 	if (!settings.aica.NoBatch && !settings.aica.DSPEnabled)
-		AICA_Sample32();
+	{
+		if (settings.aica.LowendMixer)
+			AICA_SampleLowend32();
+		else
+			AICA_Sample32();
+	}
 
 	return AICA_TICK;
 }

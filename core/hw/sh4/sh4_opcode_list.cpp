@@ -272,7 +272,7 @@ sh4_opcodelistentry opcodes[]=
 	{0                          ,i0100_nnnn_0010_1010   ,Mask_n         ,0x402A ,Normal         ,"lds <REG_N>,PR"                       ,1,2,CO,fix_none    ,dec_LD(PRM_SREG)}, //lds <REG_N>,PR
 	{0                          ,i0100_nnnn_0011_1010   ,Mask_n         ,0x403A ,Normal         ,"ldc <REG_N>,SGR"                      ,3,3,CO,fix_none    ,dec_LD(PRM_SREG)}, //lds <REG_N>,SGR
 	{0                          ,i0100_nnnn_0101_1010   ,Mask_n         ,0x405A ,UsesFPU        ,"lds <REG_N>,FPUL"                     ,1,1,CO,fix_none    ,dec_LD(PRM_SREG)}, //lds <REG_N>,FPUL
-	{0                          ,i0100_nnnn_0110_1010   ,Mask_n         ,0x406A ,FWritesFPSCR   ,"lds <REG_N>,FPSCR"                    ,1,1,CO,fix_none},  //lds <REG_N>,FPSCR
+	{dec_i0100_nnnn_0110_1010   ,i0100_nnnn_0110_1010   ,Mask_n         ,0x406A ,FWritesFPSCR   ,"lds <REG_N>,FPSCR"                    ,1,1,CO,fix_none},  //lds <REG_N>,FPSCR
 	{0                          ,i0100_nnnn_1111_1010   ,Mask_n         ,0x40FA ,Normal         ,"ldc <REG_N>,DBR"                      ,1,1,CO,fix_none    ,dec_LD(PRM_SREG)}, //lds <REG_N>,DBR
 
 	//ldc : rn

@@ -552,9 +552,25 @@ struct settings_t
 		bool WidescreenGameHacks;
 		int AnisotropicFiltering;
 		bool PowerVR2Filter;
+		// Reuse compatible GLES texture storage with glTexSubImage2D.
+		// Enabled by default and exposed as a libretro core option.
+		bool TextureStorageReuse;
+		// Reuse the fixed-size palette and fog lookup texture allocations.
+		// Experimental and disabled by default.
+		bool PaletteFogStorageReuse;
+		// Avoid writing logarithmic depth for every fragment on GLES3.
+		// 0: accurate fragment depth, 1: dynamic linear vertex depth,
+		// 2: logarithmic vertex depth, 3: approximate logarithmic vertex depth,
+		// 4: menu-guarded (accurate menus, mode 3 for moving gameplay),
+		// 5: menu guard plus the validated 4x shadow-safe threshold.
+		u32 FastDepth;
 		// Experimental low-end GLES optimization. Disabled by default and
 		// exposed as an explicit libretro core option.
 		bool AdjacentStateElision;
+		// Reorders opaque strips by exact render state before index generation
+		// so compatible strips can be submitted as one draw. Since this can
+		// change equal-depth ordering it is an explicit, per-game opt-in.
+		bool OpaqueStripMerge;
 		// Reorders and merges translucent strips for speed. This can violate
 		// PowerVR ordering semantics, so it must remain an explicit opt-in.
 		// 0: disabled, 1: aggressive/inaccurate, 2: menu-guarded.
@@ -563,7 +579,8 @@ struct settings_t
 		u32 TranslucentMenuGuardMaxVertices;
 		u32 TranslucentMenuGuardRiskThreshold;
 		f32 TranslucentMenuGuardDepthTolerance;
-		// 0: scored, 1: any flat strip, 2: every short strip.
+		// 0: scored, 1: any flat strip, 2: every short strip,
+		// 3: keep geometry confined to the top HUD band last.
 		u32 TranslucentMenuGuardStrategy;
 		// 0: disabled, 1: risky overlaps, 2: every overlap.
 		u32 TranslucentMenuGuardOverlap;
@@ -582,6 +599,9 @@ struct settings_t
 		bool disable_vmem32;
 		bool DisableDivMatching;
 		bool ForceDisableDivMatching;
+		// Compile LDS Rn,FPSCR directly in the SH4 dynarec. Experimental and
+		// disabled by default; changing it requires a content restart.
+		bool DirectLdsFpscr;
 	} dynarec;
 	
 	struct
@@ -606,6 +626,13 @@ struct settings_t
 		u32 CDDAMute;
 		u32 DSPEnabled;		//0 -> no, 1 -> yes
 		u32 NoBatch;
+		// Reduced-fidelity AICA mixer modelled after the old GPLv3 redream
+		// mixer. Disabled by default.
+		u32 LowendMixer;
+		// ARM7 cycles executed for each generated AICA sample. The Dreamcast
+		// accurate value is 32; lower values deliberately underclock the sound
+		// CPU on low-end hosts while leaving sample generation at 44.1 kHz.
+		u32 ArmCyclesPerSample;
 		u32 NoSound;        //0 ->sound, 1 -> no sound
 	} aica;
 

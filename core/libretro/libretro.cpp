@@ -1,7 +1,10 @@
 #include <cstdio>
 #include <cstdarg>
+#include <cctype>
 #include <math.h>
+#include <memory>
 #include "types.h"
+#include "lowend_profiler.h"
 #ifndef _WIN32
 #include <sys/time.h>
 #endif
@@ -49,6 +52,7 @@ char* strdup(const char *str)
 #include "../hw/pvr/spg.h"
 #include "../hw/naomi/naomi_cart.h"
 #include "../imgread/common.h"
+#include "../reios/reios.h"
 #include "../hw/aica/dsp.h"
 #include "log/LogManager.h"
 #include "cheats.h"
@@ -659,12 +663,68 @@ static void update_variables(bool first_startup)
    if (!first_startup && previous_renderer != settings.pvr.rend)
 	  renderer_changed = true;
 
+#if defined(FLYCAST_LOWEND_TEXTURE_SUBIMAGE)
+   var.key = CORE_OPTION_NAME "_texture_storage_reuse";
+
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+      settings.rend.TextureStorageReuse = strcmp(var.value, "disabled") != 0;
+   else
+      settings.rend.TextureStorageReuse = true;
+#endif
+
+   var.key = CORE_OPTION_NAME "_palette_fog_storage_reuse";
+
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+      settings.rend.PaletteFogStorageReuse = !strcmp(var.value, "enabled");
+   else
+      settings.rend.PaletteFogStorageReuse = false;
+
+   var.key = CORE_OPTION_NAME "_fast_depth";
+
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (!strcmp(var.value, "enabled"))
+         settings.rend.FastDepth = 1;
+      else if (!strcmp(var.value, "vertex_log"))
+         settings.rend.FastDepth = 2;
+      else if (!strcmp(var.value, "vertex_fast_log"))
+         settings.rend.FastDepth = 3;
+      else if (!strcmp(var.value, "menu_guarded"))
+         settings.rend.FastDepth = 4;
+      else if (!strcmp(var.value, "menu_guarded_shadow_safe"))
+         settings.rend.FastDepth = 5;
+      else
+         settings.rend.FastDepth = 0;
+   }
+   else
+      settings.rend.FastDepth = 0;
+
+   var.key = CORE_OPTION_NAME "_sh4_fpscr";
+
+   if (first_startup)
+   {
+      if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+         settings.dynarec.DirectLdsFpscr = !strcmp(var.value, "enabled");
+      else
+         settings.dynarec.DirectLdsFpscr = false;
+
+      INFO_LOG(DYNAREC, "Direct SH4 LDS FPSCR: %s",
+            settings.dynarec.DirectLdsFpscr ? "enabled" : "disabled");
+   }
+
    var.key = CORE_OPTION_NAME "_adjacent_state_elision";
 
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
       settings.rend.AdjacentStateElision = !strcmp(var.value, "enabled");
    else
       settings.rend.AdjacentStateElision = false;
+
+   var.key = CORE_OPTION_NAME "_opaque_strip_merge";
+
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+      settings.rend.OpaqueStripMerge = !strcmp(var.value, "enabled");
+   else
+      settings.rend.OpaqueStripMerge = false;
 
    var.key = CORE_OPTION_NAME "_translucent_strip_merge";
 
@@ -706,6 +766,8 @@ static void update_variables(bool first_startup)
          settings.rend.TranslucentMenuGuardStrategy = 1;
       else if (!strcmp(var.value, "all_short"))
          settings.rend.TranslucentMenuGuardStrategy = 2;
+      else if (!strcmp(var.value, "top_hud_last"))
+         settings.rend.TranslucentMenuGuardStrategy = 3;
    }
 
    settings.rend.TranslucentMenuGuardOverlap = 1;
@@ -1082,6 +1144,23 @@ static void update_variables(bool first_startup)
       settings.aica.NoBatch    = 1;
    }
 
+   var.key = CORE_OPTION_NAME "_audio_mixer";
+
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+      settings.aica.LowendMixer = !strcmp("lowend", var.value);
+   else
+      settings.aica.LowendMixer = false;
+
+   settings.aica.ArmCyclesPerSample = 32;
+   var.key = CORE_OPTION_NAME "_aica_arm_cycles";
+
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      const unsigned cycles = strtoul(var.value, NULL, 0);
+      if (cycles == 8 || cycles == 12 || cycles == 16 || cycles == 24 || cycles == 32)
+         settings.aica.ArmCyclesPerSample = cycles;
+   }
+
    var.key = CORE_OPTION_NAME "_digital_triggers";
 
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
@@ -1269,6 +1348,9 @@ static void update_variables(bool first_startup)
 
 void retro_run (void)
 {
+#if defined(FLYCAST_LOWEND_PROFILING)
+   const uint64_t lowend_frontend_frame_start = lowend_profile_now_ns();
+#endif
    bool updated     = false;
 
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated)
@@ -1308,12 +1390,20 @@ void retro_run (void)
 	   dc_run();
    }
 #if defined(HAVE_OPENGL) || defined(HAVE_OPENGLES) || defined(HAVE_VULKAN)
-   video_cb(is_dupe ? 0 : RETRO_HW_FRAME_BUFFER_VALID, screen_width, screen_height, 0);
+   {
+      LOWEND_PROFILE_SCOPE(Present);
+      video_cb(is_dupe ? 0 : RETRO_HW_FRAME_BUFFER_VALID, screen_width, screen_height, 0);
+   }
 #endif
 #if !defined(TARGET_NO_THREADS)
    if (!settings.rend.ThreadedRendering)
 #endif
 	   is_dupe = true;
+#if defined(FLYCAST_LOWEND_PROFILING)
+   lowend_profile_record(LowendProfileStage::FrontendFrame,
+         lowend_profile_now_ns() - lowend_frontend_frame_start);
+   lowend_profile_frontend_frame_complete();
+#endif
 }
 
 void retro_reset (void)
@@ -1788,6 +1878,61 @@ static void remove_extension(char *buf, const char *path, size_t size)
 
    if (base)
       *base = '\0';
+}
+
+/*
+ * Optional private ABI used by RetroRun before retro_load_game().  Keeping the
+ * probe in Flycast means the frontend does not have to duplicate the GDI, CDI
+ * and CHD readers.  The function owns a temporary Disc and does not alter the
+ * image selected by the emulator.
+ */
+extern "C" int flycast_retrorun_get_product_number_v1(
+      const char *path, char *product_number, size_t product_number_size)
+{
+   if (!path || !*path || !product_number || product_number_size == 0)
+      return 0;
+
+   product_number[0] = '\0';
+   std::unique_ptr<Disc> image(OpenDisc(path));
+   if (!image || image->sessions.empty())
+      return 0;
+
+   const u32 base_fad = image->type == GdRom
+      ? 45150
+      : image->sessions.back().StartFAD;
+   u8 sector[2048] = {};
+   image->ReadSectors(base_fad, 1, sector, sizeof(sector));
+
+   if (memcmp(sector, "SEGA SEGAKATANA", 15) != 0)
+      return 0;
+
+   static_assert(sizeof(ip_meta_t) <= sizeof(sector),
+                 "Dreamcast IP metadata must fit in its first sector");
+   ip_meta_t metadata = {};
+   memcpy(&metadata, sector, sizeof(metadata));
+
+   const char *first = metadata.product_number;
+   const char *last = first + sizeof(metadata.product_number);
+   while (first < last &&
+          (*first == '\0' || std::isspace(static_cast<unsigned char>(*first))))
+      ++first;
+   while (last > first &&
+          (last[-1] == '\0' ||
+           std::isspace(static_cast<unsigned char>(last[-1]))))
+      --last;
+
+   const size_t length = static_cast<size_t>(last - first);
+   if (length == 0 || length + 1 > product_number_size)
+      return 0;
+   for (const char *character = first; character != last; ++character)
+   {
+      if (!std::isprint(static_cast<unsigned char>(*character)))
+         return 0;
+   }
+
+   memcpy(product_number, first, length);
+   product_number[length] = '\0';
+   return 1;
 }
 
 #ifdef HAVE_VULKAN

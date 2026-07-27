@@ -293,6 +293,28 @@ sh4dec(i0100_nnnn_0000_1110)
 	dec_End(0xFFFFFFFF,BET_StaticIntr,false);
 }
 
+// lds <REG_N>,FPSCR
+//
+// The default path deliberately matches the generic decoder's interpreter
+// fallback. The direct path is an opt-in runtime experiment.
+sh4dec(i0100_nnnn_0110_1010)
+{
+	if (!settings.dynarec.DirectLdsFpscr)
+	{
+		dec_fallback(op);
+		dec_End(state.cpu.rpc+2, BET_StaticJump, false);
+		return;
+	}
+
+	u32 n = GetN(op);
+
+	Emit(shop_mov32, reg_fpscr, (Sh4RegType)(reg_r0+n));
+	Emit(shop_sync_fpscr);
+	// FPSCR controls FPU register banking and instruction decoding, so the
+	// following guest instruction must start a newly compiled block.
+	dec_End(state.cpu.rpc+2, BET_StaticJump, false);
+}
+
 //nop !
 sh4dec(i0000_0000_0000_1001)
 {

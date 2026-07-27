@@ -1,4 +1,5 @@
 #include "TexCache.h"
+#include "lowend_profiler.h"
 #include "CustomTexture.h"
 #ifdef HAVE_TEXUPSCALE
 #include "deps/xbrz/xbrz.h"
@@ -407,9 +408,17 @@ bool BaseTextureCacheData::NeedsUpdate() {
 	if (tex_type != TextureType::_8)
 	{
 		if (tcw.PixelFmt == PixelPal4 && palette_hash != pal_hash_16[tcw.PalSelect])
+		{
 			rc = true;
+			if (Updates != 0)
+				LOWEND_TEXTURE_ADD(PaletteInvalidations, 1);
+		}
 		else if (tcw.PixelFmt == PixelPal8 && palette_hash != pal_hash_256[tcw.PalSelect >> 4])
+		{
 			rc = true;
+			if (Updates != 0)
+				LOWEND_TEXTURE_ADD(PaletteInvalidations, 1);
+		}
 	}
 
 	return rc;
@@ -440,6 +449,10 @@ void BaseTextureCacheData::Create()
 	lock_block = nullptr;
 	custom_image_data = nullptr;
 	custom_load_in_progress = 0;
+#if defined(FLYCAST_LOWEND_PROFILING)
+	lowend_profile_source_hash = 0;
+	lowend_profile_source_hash_valid = false;
+#endif
 
 	//decode info from tsp/tcw into the texture struct
 	tex = &format[tcw.PixelFmt == PixelReserved ? Pixel1555 : tcw.PixelFmt];	//texture format table entry
@@ -526,6 +539,9 @@ void BaseTextureCacheData::ComputeHash()
 
 void BaseTextureCacheData::Update()
 {
+#if defined(FLYCAST_LOWEND_PROFILING)
+	const uint64_t lowend_texture_decode_start = lowend_profile_now_ns();
+#endif
 	//texture state tracking stuff
 	Updates++;
 	dirty=0;
@@ -573,11 +589,43 @@ void BaseTextureCacheData::Update()
 		else
 		{
 			WARN_LOG(RENDERER, "Warning: invalid texture. Address %08X %08X size %d", sa_tex, sa, size);
+#if defined(FLYCAST_LOWEND_PROFILING)
+			lowend_profile_record(LowendProfileStage::TextureDecode,
+					lowend_profile_now_ns() - lowend_texture_decode_start);
+#endif
 			return;
 		}
 	}
 	if (settings.rend.CustomTextures)
 		custom_texture.LoadCustomTextureAsync(this);
+
+#if defined(FLYCAST_LOWEND_PROFILING)
+	const uint64_t lowend_texture_hash_start = lowend_profile_now_ns();
+	const size_t lowend_source_size =
+			static_cast<size_t>(static_cast<uint64_t>(sa) + size - sa_tex);
+	u32 lowend_source_hash = XXH32(&vram[sa_tex], lowend_source_size, 7);
+	if (IsPaletted())
+		lowend_source_hash ^= palette_hash;
+	const uint64_t lowend_texture_hash_duration =
+			lowend_profile_now_ns() - lowend_texture_hash_start;
+	lowend_profile_record(LowendProfileStage::TextureHash,
+			lowend_texture_hash_duration);
+	if (lowend_profile_source_hash_valid && lowend_source_hash == lowend_profile_source_hash)
+		LOWEND_TEXTURE_ADD(IdenticalReuploads, 1);
+	lowend_profile_source_hash = lowend_source_hash;
+	lowend_profile_source_hash_valid = true;
+
+	LOWEND_TEXTURE_ADD(TextureUpdates, 1);
+	LOWEND_TEXTURE_ADD(SourceBytes, lowend_source_size);
+	if (tcw.VQ_Comp)
+		LOWEND_TEXTURE_ADD(VqDecodes, 1);
+	else if (tcw.ScanOrder)
+		LOWEND_TEXTURE_ADD(PlanarDecodes, 1);
+	else
+		LOWEND_TEXTURE_ADD(TwiddledDecodes, 1);
+	if (IsPaletted())
+		LOWEND_TEXTURE_ADD(PalettedDecodes, 1);
+#endif
 
 	void *temp_tex_buffer = NULL;
 	u32 upscaled_w = w;
@@ -599,6 +647,7 @@ void BaseTextureCacheData::Update()
 		&& texconv != NULL
 		&& !Force32BitTexture(tex_type))
 		need_32bit_buffer = false;
+
 	// TODO avoid upscaling/depost. textures that change too often
 
 	bool mipmapped = IsMipmapped() && !settings.rend.DumpTextures;
@@ -734,6 +783,31 @@ void BaseTextureCacheData::Update()
 	//lock the texture to detect changes in it
    libCore_vramlock_Lock(sa_tex, sa + size - 1, this);
 
+#if defined(FLYCAST_LOWEND_PROFILING)
+	const uint64_t lowend_texture_decode_duration =
+			lowend_profile_now_ns() - lowend_texture_decode_start
+			- lowend_texture_hash_duration;
+	lowend_profile_record(LowendProfileStage::TextureDecode,
+			lowend_texture_decode_duration);
+	const unsigned lowend_decoded_levels = mipmapped ? tsp.TexU + 4u : 1u;
+	uint64_t lowend_decoded_pixels = 0;
+	if (mipmapped)
+	{
+		for (unsigned level = 0; level < lowend_decoded_levels; ++level)
+			lowend_decoded_pixels += uint64_t(1) << (2 * level);
+	}
+	else
+	{
+		lowend_decoded_pixels = static_cast<uint64_t>(upscaled_w) * upscaled_h;
+	}
+	const unsigned lowend_decoded_bpp = tex_type == TextureType::_8888 ? 4
+			: tex_type == TextureType::_8 ? 1 : 2;
+	const uint64_t lowend_decoded_bytes = lowend_decoded_pixels * lowend_decoded_bpp;
+	LOWEND_TEXTURE_ADD(DecodedBytes, lowend_decoded_bytes);
+	LOWEND_TEXTURE_ADD(MipLevelsDecoded, lowend_decoded_levels);
+	lowend_profile_texture_decode(static_cast<unsigned>(tcw.PixelFmt),
+			lowend_decoded_bytes, lowend_texture_decode_duration);
+#endif
 	UploadToGPU(upscaled_w, upscaled_h, (u8*)temp_tex_buffer, IsMipmapped(), mipmapped);
 	if (settings.rend.DumpTextures)
 	{
@@ -941,6 +1015,7 @@ void WriteTextureToVRam(u32 width, u32 height, u8 *data, u16 *dst)
 static void rend_text_invl(vram_block* bl)
 {
 	BaseTextureCacheData* tcd = (BaseTextureCacheData*)bl->userdata;
+	LOWEND_TEXTURE_ADD(VramInvalidations, 1);
 	tcd->dirty = FrameCount;
 	tcd->lock_block = nullptr;
 

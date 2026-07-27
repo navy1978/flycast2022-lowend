@@ -21,6 +21,7 @@
 #include "blockmanager.h"
 #include "ngen.h"
 #include "decoder.h"
+#include "lowend_profiler.h"
 
 #if FEAT_SHREC != DYNAREC_NONE
 
@@ -71,6 +72,7 @@ void clear_temp_cache(bool full)
 
 static void recSh4_ClearCache(void)
 {
+	LOWEND_DYNAREC_ADD(CacheClears, 1);
 	INFO_LOG(DYNAREC, "recSh4:Dynarec Cache clear at %08X free space %d", next_pc, emit_FreeSpace());
 	LastAddr=LastAddr_min;
 	bm_ResetCache();
@@ -236,6 +238,22 @@ DynarecCodeEntryPtr rdv_CompilePC(u32 blockcheck_failures)
 		verify(rbi->code!=0);
 
 		bm_AddBlock(rbi);
+		LOWEND_DYNAREC_ADD(CompiledBlocks, 1);
+		LOWEND_DYNAREC_ADD(GuestOpcodes, rbi->guest_opcodes);
+		LOWEND_DYNAREC_ADD(HostOpcodes, rbi->host_opcodes);
+		LOWEND_DYNAREC_ADD(HostCodeBytes, rbi->host_code_size);
+		switch (BET_GET_CLS(rbi->BlockType))
+		{
+		case BET_CLS_Static:
+			LOWEND_DYNAREC_ADD(StaticExits, 1);
+			break;
+		case BET_CLS_Dynamic:
+			LOWEND_DYNAREC_ADD(DynamicExits, 1);
+			break;
+		case BET_CLS_COND:
+			LOWEND_DYNAREC_ADD(ConditionalExits, 1);
+			break;
+		}
 
 	if (emit_ptr != NULL)
 	{
@@ -254,6 +272,7 @@ DynarecCodeEntryPtr DYNACALL rdv_FailedToFindBlock_pc()
 
 DynarecCodeEntryPtr DYNACALL rdv_FailedToFindBlock(u32 pc)
 {
+	LOWEND_DYNAREC_ADD(FailedToFindBlocks, 1);
 	//printf("rdv_FailedToFindBlock ~ %08X\n",pc);
 	next_pc=pc;
 	DynarecCodeEntryPtr code = rdv_CompilePC(0);
@@ -286,6 +305,7 @@ u32 DYNACALL rdv_DoInterrupts(void* block_cpde)
 // addr must be the physical address of the start of the block
 DynarecCodeEntryPtr DYNACALL rdv_BlockCheckFail(u32 addr)
 {
+	LOWEND_DYNAREC_ADD(BlockCheckFailures, 1);
 	u32 blockcheck_failures = 0;
 	if (mmu_enabled())
 	{
@@ -318,6 +338,7 @@ DynarecCodeEntryPtr rdv_FindOrCompile()
 
 void* DYNACALL rdv_LinkBlock(u8* code,u32 dpc)
 {
+	LOWEND_DYNAREC_ADD(LinkResolutions, 1);
 	// code is the RX addr to return after, however bm_GetBlock returns RW
 	RuntimeBlockInfoPtr rbi=bm_GetBlock2((void*)code);
 	bool stale_block = false;

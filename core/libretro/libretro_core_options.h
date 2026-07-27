@@ -284,6 +284,81 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "disabled",
 #endif
    },
+#if defined(FLYCAST_LOWEND_TEXTURE_SUBIMAGE)
+   {
+      CORE_OPTION_NAME "_texture_storage_reuse",
+      "Texture Storage Reuse",
+      NULL,
+      "Reuses an existing compatible GLES texture allocation with "
+      "glTexSubImage2D instead of redefining it with glTexImage2D. This "
+      "improves texture-heavy games on low-end devices. Disable to restore "
+      "the original texture upload path.",
+      NULL,
+      "video",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "enabled",
+   },
+#endif
+   {
+      CORE_OPTION_NAME "_palette_fog_storage_reuse",
+      "Palette/Fog Texture Storage Reuse (Experimental)",
+      NULL,
+      "Reuses the fixed-size GLES allocations used by the Dreamcast palette "
+      "and fog lookup textures. This may reduce texture allocation overhead "
+      "on low-end GPUs. Keep disabled unless the game has been visually "
+      "verified.",
+      NULL,
+      "video",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled",
+   },
+   {
+      CORE_OPTION_NAME "_fast_depth",
+      "Fast Depth Calculation (Inaccurate)",
+      NULL,
+      "Moves the GLES3 depth calculation from every fragment to the vertex "
+      "shader, allowing the GPU to interpolate depth. This can substantially "
+      "reduce fragment cost on low-end GPUs, but may cause z-fighting or "
+      "incorrect surface intersections. Restart content after changing this "
+      "option.",
+      NULL,
+      "video",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { "vertex_log", "Vertex Logarithmic" },
+         { "vertex_fast_log", "Vertex Fast Logarithmic" },
+         { "menu_guarded", "Vertex Fast Logarithmic + Menu Guard (Aggressive)" },
+         { "menu_guarded_shadow_safe", "Vertex Fast Logarithmic + Menu/Shadow Guard" },
+         { NULL, NULL },
+      },
+      "disabled",
+   },
+   {
+      CORE_OPTION_NAME "_sh4_fpscr",
+      "Direct SH4 FPSCR (Experimental)",
+      NULL,
+      "Compiles the SH4 LDS Rn,FPSCR instruction directly in the dynarec "
+      "instead of falling back to the interpreter. This may improve CPU "
+      "performance on low-end devices. Restart content after changing this "
+      "option. Keep disabled unless the game has been verified.",
+      NULL,
+      "hacks",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled",
+   },
    {
       CORE_OPTION_NAME "_adjacent_state_elision",
       "Adjacent Render-State Elision (Experimental)",
@@ -322,18 +397,39 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "disabled",
    },
    {
+      CORE_OPTION_NAME "_opaque_strip_merge",
+      "Opaque Strip Merge (Experimental)",
+      NULL,
+      "Groups opaque strips with identical render state before index "
+      "generation so they can share one GLES draw submission. This can "
+      "substantially reduce driver overhead on draw-call-heavy games, but "
+      "may change the result of equal-depth geometry. Keep disabled unless "
+      "the game has been visually verified.",
+      NULL,
+      "video",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled",
+   },
+   {
       CORE_OPTION_NAME "_translucent_menu_guard_strategy",
       "Menu Guard Strategy",
       NULL,
       "Controls which translucent strips Menu Guard keeps as separate draws. "
       "Scored combines several menu-like signals. Flat protects every short "
-      "constant-depth strip. All Short is the broadest diagnostic setting.",
+      "constant-depth strip. All Short is the broadest diagnostic setting. "
+      "Top HUD Last keeps wide geometry confined to the upper HUD band in "
+      "submission order and draws it after sorted world transparency.",
       NULL,
       "video",
       {
          { "scored",    "Scored Heuristic" },
          { "flat",      "All Flat Short Strips" },
          { "all_short", "All Short Strips" },
+         { "top_hud_last", "Top HUD Last (Experimental)" },
          { NULL, NULL },
       },
       "scored",
@@ -683,6 +779,44 @@ struct retro_core_option_v2_definition option_defs_us[] = {
 #else
       "enabled",
 #endif
+   },
+   {
+      CORE_OPTION_NAME "_audio_mixer",
+      "Audio Mixer",
+      NULL,
+      "Accurate uses Flycast's optimized AICA mixer. Low-end Simplified uses "
+      "a reduced frame-major mixer that omits envelopes, filters, LFO, pan, "
+      "DSP routing and CD audio. It is deliberately inaccurate but improves "
+      "performance on slow handhelds. DSP must be disabled for the simplified "
+      "path.",
+      NULL,
+      "audio",
+      {
+         { "accurate", "Accurate (Flycast)" },
+         { "lowend",   "Low-end Simplified (Inaccurate)" },
+         { NULL, NULL },
+      },
+      "accurate",
+   },
+   {
+      CORE_OPTION_NAME "_aica_arm_cycles",
+      "AICA ARM7 Cycles per Sample (Experimental)",
+      NULL,
+      "Underclocks only the emulated AICA ARM7 sound CPU while keeping output "
+      "at 44.1 kHz. Lower values can reduce host CPU usage, but may delay or "
+      "break music, effects, channel updates, or sound-driver timing. The "
+      "Dreamcast-accurate value is 32.",
+      NULL,
+      "audio",
+      {
+         { "32", "32 (Accurate)" },
+         { "24", "24 (75%)" },
+         { "16", "16 (50%)" },
+         { "12", "12 (37.5%)" },
+         { "8",  "8 (25%)" },
+         { NULL, NULL },
+      },
+      "32",
    },
    {
       CORE_OPTION_NAME "_anisotropic_filtering",

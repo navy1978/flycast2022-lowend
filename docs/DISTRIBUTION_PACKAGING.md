@@ -26,8 +26,15 @@ packaging transformations:
 The resulting low-end option keys are:
 
 ```text
+flycast2022_texture_storage_reuse
+flycast2022_palette_fog_storage_reuse
+flycast2022_fast_depth
+flycast2022_sh4_fpscr
+flycast2022_audio_mixer
+flycast2022_aica_arm_cycles
 flycast2022_sh4clock
 flycast2022_adjacent_state_elision
+flycast2022_opaque_strip_merge
 flycast2022_translucent_strip_merge
 flycast2022_translucent_menu_guard_strategy
 flycast2022_translucent_menu_guard_max_vertices
@@ -39,6 +46,15 @@ flycast2022_translucent_menu_guard_draw_sorting
 
 The separate identity prevents its settings, overrides and save states from
 colliding with AmberELEC's existing Flycast and Flycast 2021 cores.
+AmberELEC's RetroRun launcher writes
+`flycast2022_texture_storage_reuse = enabled` by default and accepts an
+explicit disabled setting as the package-level escape hatch. Palette/fog
+storage reuse is written as disabled unless explicitly enabled.
+Direct SH4 FPSCR decoding is likewise written as disabled unless explicitly
+enabled. `fast_depth = menu_guarded` and
+`fast_depth = menu_guarded_shadow_safe` require the corresponding values to
+be preserved by distribution option validation. Restart the content after
+changing Fast Depth or direct SH4 FPSCR decoding.
 
 ## dArkOS
 
@@ -47,8 +63,15 @@ fork without applying the AmberELEC identity transformations. The low-end keys
 will therefore be:
 
 ```text
+reicast_texture_storage_reuse
+reicast_palette_fog_storage_reuse
+reicast_fast_depth
+reicast_sh4_fpscr
+reicast_audio_mixer
+reicast_aica_arm_cycles
 reicast_sh4clock
 reicast_adjacent_state_elision
+reicast_opaque_strip_merge
 reicast_translucent_strip_merge
 reicast_translucent_menu_guard_strategy
 reicast_translucent_menu_guard_max_vertices
@@ -61,6 +84,15 @@ reicast_translucent_menu_guard_draw_sorting
 Keep the libretro library name as `Flycast`. The distribution may copy or
 rename `flycast_libretro.so` to the core filename selected by EmulationStation;
 that packaging filename does not alter the option prefix.
+
+RetroRun audio threading is a frontend setting, not a Flycast core option:
+
+```text
+retrorun_force_audio_multithread = false
+```
+
+Keep it false by default. A per-game launcher override may set it to `true`
+after manual audio validation.
 
 Build the core for the ABI of the frontend that loads it:
 

@@ -40,6 +40,7 @@ using namespace vixl::aarch64;
 #include "hw/sh4/sh4_rom.h"
 #include "hw/mem/vmem32.h"
 #include "arm64_regalloc.h"
+#include "lowend_profiler.h"
 
 #undef do_sqw_nommu
 
@@ -117,6 +118,7 @@ static T ReadMemNoEx(u32 addr, u32, u32 pc)
 	T rv = mmu_ReadMemNoEx<T>(addr, &ex);
 	if (ex)
 	{
+		LOWEND_DYNAREC_ADD(Exceptions, 1);
 		spc = pc;
 		longjmp(jmp_env, 1);
 	}
@@ -133,6 +135,7 @@ static void WriteMemNoEx(u32 addr, T data, u32 pc)
 	u32 ex = mmu_WriteMemNoEx<T>(addr, data);
 	if (ex)
 	{
+		LOWEND_DYNAREC_ADD(Exceptions, 1);
 		spc = pc;
 		longjmp(jmp_env, 1);
 	}
@@ -141,9 +144,11 @@ static void WriteMemNoEx(u32 addr, T data, u32 pc)
 
 static void interpreter_fallback(u16 op, OpCallFP *oph, u32 pc)
 {
+	lowend_profile_dynarec_fallback(op);
 	try {
 		oph(op);
 	} catch (SH4ThrownException& ex) {
+		LOWEND_DYNAREC_ADD(Exceptions, 1);
 		if (pc & 1)
 		{
 			// Delay slot
@@ -160,6 +165,7 @@ static void do_sqw_mmu_no_ex(u32 addr, u32 pc)
 	try {
 		do_sqw_mmu(addr);
 	} catch (SH4ThrownException& ex) {
+		LOWEND_DYNAREC_ADD(Exceptions, 1);
 		if (pc & 1)
 		{
 			// Delay slot
@@ -170,6 +176,14 @@ static void do_sqw_mmu_no_ex(u32 addr, u32 pc)
 		longjmp(jmp_env, 1);
 	}
 }
+
+#if defined(FLYCAST_LOWEND_PROFILING)
+static void profiled_interpreter_fallback_nommu(u16 op, OpCallFP *oph)
+{
+	lowend_profile_dynarec_fallback(op);
+	oph(op);
+}
+#endif
 
 class Arm64Assembler : public MacroAssembler
 {
@@ -354,7 +368,13 @@ public:
 
 				if (!mmu_enabled())
 				{
+#if defined(FLYCAST_LOWEND_PROFILING)
+					Mov(*call_regs64[1],
+							reinterpret_cast<uintptr_t>(*OpDesc[op.rs3._imm]->oph));
+					GenCallRuntime(profiled_interpreter_fallback_nommu);
+#else
 					GenCallRuntime(OpDesc[op.rs3._imm]->oph);
+#endif
 				}
 				else
 				{
@@ -2228,6 +2248,7 @@ RuntimeBlockInfo* ngen_AllocateBlock()
 
 void ngen_HandleException()
 {
+	LOWEND_DYNAREC_ADD(Exceptions, 1);
 	longjmp(jmp_env, 1);
 }
 
@@ -2245,18 +2266,22 @@ u32 DynaRBI::Relink()
 
 void Arm64RegAlloc::Preload(u32 reg, eReg nreg)
 {
+	LOWEND_DYNAREC_ADD(GprPreloads, 1);
 	assembler->Ldr(Register(nreg, 32), assembler->sh4_context_mem_operand(GetRegPtr(reg)));
 }
 void Arm64RegAlloc::Writeback(u32 reg, eReg nreg)
 {
+	LOWEND_DYNAREC_ADD(GprWritebacks, 1);
 	assembler->Str(Register(nreg, 32), assembler->sh4_context_mem_operand(GetRegPtr(reg)));
 }
 void Arm64RegAlloc::Preload_FPU(u32 reg, eFReg nreg)
 {
+	LOWEND_DYNAREC_ADD(FprPreloads, 1);
 	assembler->Ldr(VRegister(nreg, 32), assembler->sh4_context_mem_operand(GetRegPtr(reg)));
 }
 void Arm64RegAlloc::Writeback_FPU(u32 reg, eFReg nreg)
 {
+	LOWEND_DYNAREC_ADD(FprWritebacks, 1);
 	assembler->Str(VRegister(nreg, 32), assembler->sh4_context_mem_operand(GetRegPtr(reg)));
 }
 

@@ -85,6 +85,7 @@ SOURCES_CXX := \
 					$(CORE_DIR)/core/log/LogManagerLibretro.cpp \
 					\
 					$(CORE_DIR)/core/cheats.cpp \
+					$(CORE_DIR)/core/lowend_profiler.cpp \
 					$(CORE_DIR)/core/nullDC.cpp \
 					$(CORE_DIR)/core/serialize.cpp \
 					$(CORE_DIR)/core/stdclass.cpp \

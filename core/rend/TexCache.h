@@ -686,6 +686,10 @@ public:
 	u32 custom_width;
 	u32 custom_height;
 	std::atomic_int custom_load_in_progress;
+#if defined(FLYCAST_LOWEND_PROFILING)
+	u32 lowend_profile_source_hash;
+	bool lowend_profile_source_hash_valid;
+#endif
 
 	void PrintTextureName();
 	virtual std::string GetId() = 0;

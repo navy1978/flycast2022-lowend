@@ -4,12 +4,14 @@
 	Parsing of the TA stream and generation of vertex data !
 */
 #include "ta.h"
+#include "lowend_profiler.h"
 #include "ta_ctx.h"
 #include "pvr_mem.h"
 #include "Renderer_if.h"
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 // TODO/FIXME - should be moved later
 bool pal_needs_update=true;
@@ -1422,6 +1424,57 @@ struct StripBounds
 	bool valid;
 };
 
+static bool compute_strip_bounds(const PolyParam& poly,
+		const rend_context& ctx, StripBounds& bounds)
+{
+	bounds.valid = false;
+	if (poly.count < 3)
+		return false;
+
+	const Vertex *vertices = ctx.verts.head();
+	const Vertex *vertex = &vertices[poly.first];
+	bounds.min_x = bounds.max_x = vertex->x;
+	bounds.min_y = bounds.max_y = vertex->y;
+	bounds.min_z = bounds.max_z = vertex->z;
+	for (u32 i = 0; i < poly.count; ++i)
+	{
+		const Vertex& vtx = vertices[poly.first + i];
+		if (is_vertex_inf(vtx))
+			return false;
+		bounds.min_x = std::min(bounds.min_x, vtx.x);
+		bounds.max_x = std::max(bounds.max_x, vtx.x);
+		bounds.min_y = std::min(bounds.min_y, vtx.y);
+		bounds.max_y = std::max(bounds.max_y, vtx.y);
+		bounds.min_z = std::min(bounds.min_z, vtx.z);
+		bounds.max_z = std::max(bounds.max_z, vtx.z);
+	}
+
+	bounds.valid = bounds.max_x > bounds.min_x && bounds.max_y > bounds.min_y;
+	return bounds.valid;
+}
+
+static bool is_top_hud_strip(const PolyParam& poly, const rend_context& ctx)
+{
+	StripBounds bounds = {};
+	if (!compute_strip_bounds(poly, ctx, bounds))
+		return false;
+
+	const float clip_min_x = (float)ctx.fb_X_CLIP.min;
+	const float clip_max_x = (float)ctx.fb_X_CLIP.max;
+	const float clip_min_y = (float)ctx.fb_Y_CLIP.min;
+	const float clip_max_y = (float)ctx.fb_Y_CLIP.max;
+	const float clip_width = std::max(1.f, clip_max_x - clip_min_x + 1.f);
+	const float clip_height = std::max(1.f, clip_max_y - clip_min_y + 1.f);
+	const float width = bounds.max_x - bounds.min_x;
+
+	// Health bars and score panels are normally wide and fully confined to
+	// the upper screen band. World polygons that merely cross that band
+	// continue through the rest of the viewport and are not selected.
+	return width >= clip_width * 0.08f
+			&& bounds.min_y >= clip_min_y - clip_height * 0.02f
+			&& bounds.max_y <= clip_min_y + clip_height * 0.30f;
+}
+
 // Menu and HUD geometry is not explicitly tagged by the Dreamcast. Detect
 // only the strongest generic signals: a short, screen-aligned strip at almost
 // constant depth, optionally reinforced by overlay-like depth state, screen
@@ -1436,30 +1489,13 @@ static unsigned menu_strip_risk(const PolyParam& poly, const rend_context& ctx,
 			|| poly.count > settings.rend.TranslucentMenuGuardMaxVertices)
 		return 0;
 
-	const Vertex *vertices = ctx.verts.head();
-	const Vertex *vertex = &vertices[poly.first];
-	bounds.min_x = bounds.max_x = vertex->x;
-	bounds.min_y = bounds.max_y = vertex->y;
-	bounds.min_z = bounds.max_z = vertex->z;
-	for (u32 i = 0; i < poly.count; ++i)
-	{
-		const Vertex& vtx = vertices[poly.first + i];
-		if (is_vertex_inf(vtx))
-			return 0;
-		bounds.min_x = std::min(bounds.min_x, vtx.x);
-		bounds.max_x = std::max(bounds.max_x, vtx.x);
-		bounds.min_y = std::min(bounds.min_y, vtx.y);
-		bounds.max_y = std::max(bounds.max_y, vtx.y);
-		bounds.min_z = std::min(bounds.min_z, vtx.z);
-		bounds.max_z = std::max(bounds.max_z, vtx.z);
-	}
+	if (!compute_strip_bounds(poly, ctx, bounds))
+		return 0;
 
 	const float width = bounds.max_x - bounds.min_x;
 	const float height = bounds.max_y - bounds.min_y;
-	if (width <= 0.f || height <= 0.f)
-		return 0;
-	bounds.valid = true;
 
+	const Vertex *vertices = ctx.verts.head();
 	const float x_tolerance = std::max(0.75f, width * 0.02f);
 	const float y_tolerance = std::max(0.75f, height * 0.02f);
 	unsigned corner_vertices = 0;
@@ -1511,6 +1547,32 @@ static unsigned menu_strip_risk(const PolyParam& poly, const rend_context& ctx,
 	return risk;
 }
 
+static bool is_protected_menu_strip(const StripBounds& bounds, bool flat_depth,
+		unsigned risk)
+{
+	switch (settings.rend.TranslucentMenuGuardStrategy)
+	{
+		case 1:
+			return bounds.valid && flat_depth;
+		case 2:
+			return bounds.valid;
+		default:
+			return risk >= settings.rend.TranslucentMenuGuardRiskThreshold;
+	}
+}
+
+static bool is_protected_menu_strip(const PolyParam& poly,
+		const rend_context& ctx)
+{
+	if (settings.rend.TranslucentMenuGuardStrategy == 3)
+		return is_top_hud_strip(poly, ctx);
+
+	StripBounds bounds = {};
+	bool flat_depth = false;
+	const unsigned risk = menu_strip_risk(poly, ctx, bounds, flat_depth);
+	return is_protected_menu_strip(bounds, flat_depth, risk);
+}
+
 static bool strip_bounds_overlap(const StripBounds& left, const StripBounds& right)
 {
 	return left.valid && right.valid
@@ -1524,6 +1586,7 @@ static bool strip_bounds_overlap(const StripBounds& left, const StripBounds& rig
 static void make_index(const List<PolyParam> *polys, int first, int end, bool merge,
 		rend_context* ctx, bool exact_state = false, bool menu_guard = false)
 {
+	LOWEND_PROFILE_SCOPE(IndexGeneration);
 	const u32 *indices = ctx->idx.head();
 	const Vertex *vertices = ctx->verts.head();
 
@@ -1540,21 +1603,9 @@ static void make_index(const List<PolyParam> *polys, int first, int end, bool me
 				? menu_strip_risk(*poly, *ctx, bounds, flat_depth) : 0;
 		bool protected_strip = false;
 		if (menu_guard)
-		{
-			switch (settings.rend.TranslucentMenuGuardStrategy)
-			{
-				case 1:
-					protected_strip = bounds.valid && flat_depth;
-					break;
-				case 2:
-					protected_strip = bounds.valid;
-					break;
-				default:
-					protected_strip = risk
-							>= settings.rend.TranslucentMenuGuardRiskThreshold;
-					break;
-			}
-		}
+			protected_strip = settings.rend.TranslucentMenuGuardStrategy == 3
+					? is_top_hud_strip(*poly, *ctx)
+					: is_protected_menu_strip(bounds, flat_depth, risk);
 		const bool overlaps_previous = menu_guard && last_poly != nullptr
 				&& strip_bounds_overlap(last_bounds, bounds);
 		bool protected_overlap = false;
@@ -1718,12 +1769,47 @@ static void fix_texture_bleeding(const List<PolyParam> *list)
 
 static bool UsingAutoSort(int pass_number);
 
+// Inaccurate opt-in path for draw-call-bound low-end GPUs. Opaque geometry is
+// normally order independent, so grouping exact states lets make_index()
+// connect many more strips with degenerate triangles. Keep the background
+// polygon fixed and retain stable order within each exact-state group.
+static void sort_opaque_poly_params_for_merge(List<PolyParam> *polys,
+		int first, int end)
+{
+	if (end - first <= 1)
+		return;
+
+	// The first opaque polygon in the first pass is the synthesized background.
+	if (first == 0)
+		++first;
+	if (end - first <= 1)
+		return;
+
+	std::stable_sort(&polys->head()[first], &polys->head()[end],
+			[](const PolyParam& left, const PolyParam& right) {
+#define COMPARE_STATE_FIELD(field) \
+				if (left.field != right.field) return left.field < right.field
+				COMPARE_STATE_FIELD(pcw.full);
+				COMPARE_STATE_FIELD(tcw.full);
+				COMPARE_STATE_FIELD(tsp.full);
+				COMPARE_STATE_FIELD(isp.full);
+				COMPARE_STATE_FIELD(tcw1.full);
+				COMPARE_STATE_FIELD(tsp1.full);
+				COMPARE_STATE_FIELD(tileclip);
+				COMPARE_STATE_FIELD(texid);
+				COMPARE_STATE_FIELD(texid1);
+#undef COMPARE_STATE_FIELD
+				return false;
+			});
+}
+
 // Inaccurate opt-in path: sorting translucent strips before index creation
 // makes equally configured neighbours mergeable. The normal path continues
 // to sort at draw time and is unchanged.
 static void sort_poly_params_for_merge(List<PolyParam> *polys, int first, int end,
-		rend_context *ctx)
+		rend_context *ctx, bool menu_guard)
 {
+	LOWEND_PROFILE_SCOPE(TranslucentSort);
 	if (end - first <= 1)
 		return;
 
@@ -1746,16 +1832,66 @@ static void sort_poly_params_for_merge(List<PolyParam> *polys, int first, int en
 		poly->zvZ = (const float&)min_z;
 	}
 
-	// Preserve Flycast's original PowerVR translucent depth order while
-	// moving the sort before index creation so compatible strips can merge.
-	std::stable_sort(begin, finish,
-			[](const PolyParam& left, const PolyParam& right) {
-				return left.zvZ < right.zvZ;
-			});
+	const auto depth_sort = [](PolyParam *range_begin, PolyParam *range_end) {
+		// Preserve Flycast's original PowerVR translucent depth order while
+		// moving the sort before index creation so compatible strips can merge.
+		std::stable_sort(range_begin, range_end,
+				[](const PolyParam& left, const PolyParam& right) {
+					return left.zvZ < right.zvZ;
+				});
+	};
+
+	if (!menu_guard)
+	{
+		depth_sort(begin, finish);
+		return;
+	}
+
+	if (settings.rend.TranslucentMenuGuardStrategy == 3)
+	{
+		// Sort world transparency as in the fast path, then submit the upper
+		// HUD in its original order so nearby scenery cannot cover it.
+		// Compact the world range in place and retain only the HUD entries in
+		// reusable thread-local storage. This performs one geometric test per
+		// strip without stable_partition's per-frame temporary allocation.
+		static thread_local std::vector<PolyParam> hud_entries;
+		hud_entries.clear();
+		hud_entries.reserve(std::max(hud_entries.capacity(),
+				(size_t)(finish - begin)));
+		PolyParam *world_end = begin;
+		for (PolyParam *poly = begin; poly != finish; ++poly)
+		{
+			if (is_top_hud_strip(*poly, *ctx))
+				hud_entries.push_back(*poly);
+			else
+				*world_end++ = *poly;
+		}
+		PolyParam *hud_begin = world_end;
+		for (const PolyParam& hud : hud_entries)
+			*world_end++ = hud;
+		depth_sort(begin, hud_begin);
+		return;
+	}
+
+	// A protected HUD/menu strip must retain its submission position. Merely
+	// excluding it from index merging is not sufficient: sorting the complete
+	// translucent list can still move world geometry in front of the overlay.
+	// Sort only the ranges between protected strips so each protected strip is
+	// a stable ordering barrier while ordinary geometry remains mergeable.
+	PolyParam *range_begin = begin;
+	for (PolyParam *poly = begin; poly != finish; ++poly)
+	{
+		if (!is_protected_menu_strip(*poly, *ctx))
+			continue;
+		depth_sort(range_begin, poly);
+		range_begin = poly + 1;
+	}
+	depth_sort(range_begin, finish);
 }
 
 bool ta_parse_vdrc(TA_context* ctx)
 {
+	LOWEND_PROFILE_SCOPE(TAParse);
 	bool rv=false;
 	vd_ctx = ctx;
 	vd_rc = vd_ctx->rend;
@@ -1803,8 +1939,12 @@ bool ta_parse_vdrc(TA_context* ctx)
 				RenderPass *render_pass = vd_rc.render_passes.Append();
 				render_pass->autosort = UsingAutoSort(pass);
 				render_pass->op_count = vd_rc.global_param_op.used();
+				if (settings.rend.OpaqueStripMerge)
+					sort_opaque_poly_params_for_merge(&vd_rc.global_param_op,
+							op_poly_count, render_pass->op_count);
 				make_index(&vd_rc.global_param_op, op_poly_count,
-						render_pass->op_count, true, &vd_rc);
+						render_pass->op_count, true, &vd_rc,
+						settings.rend.OpaqueStripMerge);
 				op_poly_count = render_pass->op_count;
 				render_pass->mvo_count = vd_rc.global_param_mvo.used();
 				render_pass->pt_count = vd_rc.global_param_pt.used();
@@ -1819,10 +1959,17 @@ bool ta_parse_vdrc(TA_context* ctx)
 						settings.rend.TranslucentStripMerge == 2;
 				if (merge_translucent)
 					sort_poly_params_for_merge(&vd_rc.global_param_tr, tr_poly_count,
-							render_pass->tr_count, &vd_rc);
+							render_pass->tr_count, &vd_rc,
+							guard_translucent_menus);
+				// top_hud_last already preserves HUD ordering by moving the
+				// stable HUD range after the sorted world range. It does not
+				// need the older per-strip merge barriers, whose geometry
+				// scoring and extra draw boundaries only add CPU/driver work.
+				const bool guard_index_merges = guard_translucent_menus
+						&& settings.rend.TranslucentMenuGuardStrategy != 3;
 				make_index(&vd_rc.global_param_tr, tr_poly_count,
 						render_pass->tr_count, merge_translucent, &vd_rc,
-						merge_translucent, guard_translucent_menus);
+						merge_translucent, guard_index_merges);
 				tr_poly_count = render_pass->tr_count;
 				render_pass->mvo_tr_count = vd_rc.global_param_mvo_tr.used();
 				render_pass->z_clear = ClearZBeforePass(pass);

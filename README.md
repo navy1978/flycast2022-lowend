@@ -43,6 +43,86 @@ All option keys are generated from the compile-time core option prefix. This
 keeps the implementation identical across distributions while allowing each
 package to preserve its existing configuration names.
 
+### Texture Storage Reuse
+
+Key:
+
+```text
+reicast_texture_storage_reuse
+```
+
+Values:
+
+- `enabled` (default): uses `glTexSubImage2D` when an existing texture
+  allocation has exactly the required width, height, GLES format and type.
+- `disabled`: restores the original `glTexImage2D` upload path.
+
+Five alternating RG351V runs improved mean FPS by 7.45% in the texture-heavy
+Marvel vs. Capcom 2 scene. Sonic Adventure 2 and Soul Calibur showed no
+meaningful performance regression, and the final candidate passed the user's
+visual and audible device tests. The first upload, allocation mismatches,
+mip-chain uploads, recreated texture IDs and render-to-texture hand-offs retain
+the original allocation path.
+
+### Fast Depth Calculation
+
+Key:
+
+```text
+reicast_fast_depth
+```
+
+Values:
+
+- `disabled` (default): retains Flycast's per-fragment logarithmic depth;
+- `enabled`: uses the original experimental linear per-vertex approximation;
+- `vertex_log`: calculates logarithmic depth per vertex;
+- `vertex_fast_log`: uses the lower-cost logarithmic per-vertex approximation;
+- `menu_guarded`: aggressive profile that uses `vertex_fast_log` during
+  moving gameplay and restores accurate per-fragment depth for menu-sized
+  scenes, font-like interface scenes and stable paused scenes. It maximizes
+  gameplay performance but can show rectangular projected shadows.
+- `menu_guarded_shadow_safe`: adds the same menu/pause guard and restores
+  accurate depth only for opaque shadow receivers whose vertex-depth range
+  exceeds 4x. This avoids the rectangular projected-shadow artifacts seen in
+  Sonic Adventure 2 while keeping ordinary gameplay on the fast path.
+
+On the RG351V Sonic Adventure 2 state, the final
+`menu_guarded_shadow_safe` plus
+`reicast_opaque_strip_merge = enabled` profile presented every frame at 30.35
+FPS versus 23.24 FPS for the previous shadow-safe profile (`+30.6%`). Shadows,
+menus, audio and gameplay passed manual review. The older depth-only
+`menu_guarded` experiment remains available for reproducibility but was both
+slower in the final comparison and visually incorrect. The original DOA test
+flashed, but the later `vertex_fast_log` profile with fog and mipmapping
+disabled passed manual video, audio and input review.
+Soul Calibur needs its separate translucent HUD ordering guard described below. See
+[the compatibility notes](docs/LOW_END_COMPATIBILITY.md).
+
+### Audio Mixer
+
+Key:
+
+```text
+reicast_audio_mixer
+```
+
+Values:
+
+- `accurate` (default): uses the original Flycast AICA path;
+- `lowend`: uses the deliberately simplified low-end mixer.
+
+The low-end path reduces AICA work by omitting envelopes, filters, LFO, pan,
+DSP routing and CD audio. It is intended for games where CPU time matters more
+than exact audio reproduction. The user approved it in Sonic Adventure 2 but
+reported lower audio quality in Dead or Alive 2 Europe, so it should also be
+selected per game.
+
+The independent `reicast_aica_arm_cycles` option underclocks only the emulated
+AICA ARM7 sound CPU. Its accurate default is `32`; experimental values are
+`24`, `16`, `12` and `8`. Lower values can delay or break sound-driver timing.
+They remain disabled by default and require an audible per-game test.
+
 ### Adjacent Render-State Elision
 
 Key:
@@ -92,6 +172,16 @@ reicast_translucent_menu_guard_overlap = risky
 reicast_translucent_menu_guard_draw_sorting = standard
 ```
 
+`strategy = top_hud_last` is an experimental fighting-game profile. It
+classifies wide translucent geometry confined to the upper screen band once,
+sorts ordinary world transparency through the fast path, and submits the HUD
+last in its original order. On the repeatable Soul Calibur state, two paired
+1,200-frame tests were 20.3% and 26.1% faster than the correct-order control
+(23.2% aggregate), with no skipped frames. The stricter 2,400-frame final pair
+was 49.781 versus 42.623 seconds, or 16.79%; the later part of the scene reduces
+the gain. It still requires the final manual health-bar review before being
+classified as compatible, and must not yet be described as a stable 20% gain.
+
 For a menu not detected by the default profile, first try
 `max_vertices = 16`, then `strategy = flat`. `strategy = all_short` is the
 broadest diagnostic mode: it is useful to confirm that retaining the suspected
@@ -133,12 +223,46 @@ The development patches, including rejected diagnostics and superseded
 renderer experiments, are preserved in the
 [patch archive](docs/PATCH_ARCHIVE.md).
 
+## Performance investigation
+
+The RG351V investigation is documented in the
+[reproducible baseline](docs/PERFORMANCE_BASELINE.md),
+[profiler guide](docs/PROFILING_GUIDE.md),
+[AArch64 dynarec report](docs/AARCH64_DYNAREC_PROFILE.md), and
+[texture profile](docs/TEXTURE_PROFILE.md), and
+[next-candidate report](docs/NEXT_OPTIMIZATION_REPORT.md). Raw profiles and
+alternating-run results are under `benchmarks/`.
+
+Development-only build switches currently include:
+
+```sh
+LOWEND_PROFILING=0
+LOWEND_TEXTURE_SUBIMAGE=1
+```
+
+`LOWEND_TEXTURE_SUBIMAGE=1` compiles the accepted storage-reuse path and its
+runtime option by default. Set it to `0` for an emergency build-time opt-out.
+Palette/fog lookup reuse is included as the runtime option
+`reicast_palette_fog_storage_reuse` and is disabled by default. Direct SH4
+`LDS FPSCR` decoding is included as the runtime option `reicast_sh4_fpscr`,
+also disabled by default; restart the content after changing it. Opaque-strip
+state grouping is exposed as `reicast_opaque_strip_merge`, disabled by
+default. The profiler remains disabled in release builds. The rejected DIV1,
+texture-shadow, PAL4, transient-discard, multi-draw, SH4-timeslice and
+ARM7-batching implementations were removed from the production source; their
+reports and raw benchmark evidence remain archived.
+
 ## Suggested low-end baseline
 
 Start with the accurate path:
 
 ```ini
+reicast_texture_storage_reuse = enabled
+reicast_palette_fog_storage_reuse = disabled
+reicast_sh4_fpscr = disabled
+reicast_aica_arm_cycles = 32
 reicast_adjacent_state_elision = disabled
+reicast_opaque_strip_merge = disabled
 reicast_translucent_strip_merge = disabled
 reicast_sh4clock = 200
 ```
@@ -162,6 +286,19 @@ If the guarded mode is visually correct but not fast enough, test
 default. A setting that works well for one Dreamcast title can damage another
 title's menus.
 
+The tested product numbers and proposed per-content profiles are:
+
+| Product number | Title / status | Important overrides |
+| --- | --- | --- |
+| `MK-51117` | Sonic Adventure 2; gameplay, menus, audio and projected shadows manually approved | `fast_depth = menu_guarded_shadow_safe`, low-end mixer and opaque merge on; 30.35 versus 23.24 FPS (`+30.6%`) |
+| `RDC-0140`, `RDC-0149` | Dead or Alive 2 observed CDI variants; manually approved | `fast_depth = vertex_fast_log`, fog/mipmapping off, opaque merge on, EGL D24S0 |
+| `T1401D  50` | Soul Calibur; compatibility profile visually correct, faster alternative still has an intermittent HUD defect | Validated: `draw_sorting = per_triangle`, fog/mipmapping on and opaque merge off. Performance: `strategy = top_hud_last`, fog/mipmapping off, opaque merge on and EGL D24S0 |
+| `MK-51035` | Crazy Taxi; no repeatable faster candidate retained | Keep the accurate control profile |
+
+These are documentation keys, not hard-coded automatic overrides. A different
+region or revision can have a different product number and must be validated
+separately.
+
 ## Building the libretro core
 
 Use the same toolchain and platform flags as the target distribution. A
@@ -179,11 +316,12 @@ make clean
 make platform=classic_armv8_a35 FORCE_GLES=1 -j$(nproc)
 ```
 
-The Makefile produces `flycast_libretro.so`. AmberELEC performs its established
-Flycast 2021 identity and filename conversion in `package.mk`; dArkOS should
-install the unmodified identity under the filename expected by its selected
-64-bit or 32-bit frontend. A 64-bit core cannot be loaded by `retroarch32` or
-`retrorun32`, and a 32-bit core cannot be loaded by their 64-bit counterparts.
+The Makefile produces `flycast_libretro.so`. AmberELEC performs the documented
+Flycast 2022 Low-End identity and filename conversion in `package.mk`; dArkOS
+should install the unmodified identity under the filename expected by its
+selected 64-bit or 32-bit frontend. A 64-bit core cannot be loaded by
+`retroarch32` or `retrorun32`, and a 32-bit core cannot be loaded by their
+64-bit counterparts.
 
 ## Project status
 
@@ -199,9 +337,15 @@ by itself prove that audio, transparency, menus and save states remain correct.
 
 ## License and attribution
 
-The project preserves the original history and is distributed under the
-GPL-2.0 license in [LICENSE](LICENSE). Flycast, reicast and libretro
-attributions remain with their respective authors.
+The original reicast/Flycast files retain their GPL-2.0-or-later notices and
+the GPLv2 text in [LICENSE](LICENSE). This fork also contains the optional
+Redream-derived low-end AICA path documented in
+[NOTICE-REDREAM.md](NOTICE-REDREAM.md). A combined distribution containing
+that path is distributed under GPLv3; the complete GPLv3 text is already
+included at `core/deps/picotcp/LICENSE.GPLv3`.
+
+Flycast, reicast, libretro and Redream attributions remain with their
+respective authors.
 
 Code contributed to this fork is not bound by the Individual Contributor
 License Agreement of the upstream reicast repository and must not be treated

@@ -4,6 +4,7 @@
 #include <libretro.h>
 
 #include "gles.h"
+#include "lowend_profiler.h"
 
 #ifndef GL_IMPLEMENTATION_COLOR_READ_TYPE
 #define GL_IMPLEMENTATION_COLOR_READ_TYPE 0x8B9A
@@ -39,6 +40,11 @@ extern "C" struct retro_hw_render_callback hw_render;
 
 void TextureCacheData::UploadToGPU(int width, int height, u8 *temp_tex_buffer, bool mipmapped, bool mipmapsIncluded)
 {
+	LOWEND_PROFILE_SCOPE(TextureUpload);
+#if defined(FLYCAST_LOWEND_PROFILING)
+	const uint64_t lowend_texture_upload_start = lowend_profile_now_ns();
+	uint64_t lowend_uploaded_bytes = 0;
+#endif
 	if (texID != 0)
 	{
 		//upload to OpenGL !
@@ -116,6 +122,11 @@ void TextureCacheData::UploadToGPU(int width, int height, u8 *temp_tex_buffer, b
 				for (int i = 0; i < mipmapLevels; i++)
 				{
 					glTexSubImage2D(GL_TEXTURE_2D, mipmapLevels - i - 1, 0, 0, 1 << i, 1 << i, comps, gltype, temp_tex_buffer);
+#if defined(FLYCAST_LOWEND_PROFILING)
+					LOWEND_TEXTURE_ADD(TexSubImage2DCalls, 1);
+					LOWEND_TEXTURE_ADD(MipLevelsUploaded, 1);
+					lowend_uploaded_bytes += (uint64_t(1) << (2 * i)) * bytes_per_pixel;
+#endif
 					temp_tex_buffer += (1 << (2 * i)) * bytes_per_pixel;
 				}
 			}
@@ -127,17 +138,66 @@ void TextureCacheData::UploadToGPU(int width, int height, u8 *temp_tex_buffer, b
 				for (int i = 0; i < mipmapLevels; i++)
 				{
 					glTexImage2D(GL_TEXTURE_2D, mipmapLevels - i - 1, comps, 1 << i, 1 << i, 0, comps, gltype, temp_tex_buffer);
+#if defined(FLYCAST_LOWEND_PROFILING)
+					LOWEND_TEXTURE_ADD(TexImage2DCalls, 1);
+					LOWEND_TEXTURE_ADD(MipLevelsUploaded, 1);
+					lowend_uploaded_bytes += (uint64_t(1) << (2 * i)) * bytes_per_pixel;
+#endif
 					temp_tex_buffer += (1 << (2 * i)) * bytes_per_pixel;
 				}
 			}
 		}
 		else
 		{
+#if defined(FLYCAST_LOWEND_TEXTURE_SUBIMAGE)
+			const bool lowend_reuse_storage = settings.rend.TextureStorageReuse
+					&& lowend_storage_valid
+					&& lowend_storage_width == width
+					&& lowend_storage_height == height
+					&& lowend_storage_format == comps
+					&& lowend_storage_type == gltype;
+			if (lowend_reuse_storage)
+			{
+				glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
+						comps, gltype, temp_tex_buffer);
+				LOWEND_TEXTURE_ADD(TexSubImage2DCalls, 1);
+				LOWEND_TEXTURE_ADD(TextureStorageReuses, 1);
+			}
+			else
+			{
+				glTexImage2D(GL_TEXTURE_2D, 0, comps, width, height, 0,
+						comps, gltype, temp_tex_buffer);
+				lowend_storage_valid = true;
+				lowend_storage_width = width;
+				lowend_storage_height = height;
+				lowend_storage_format = comps;
+				lowend_storage_type = gltype;
+				LOWEND_TEXTURE_ADD(TexImage2DCalls, 1);
+			}
+#else
 			glTexImage2D(GL_TEXTURE_2D, 0,comps, width, height, 0, comps, gltype, temp_tex_buffer);
+			LOWEND_TEXTURE_ADD(TexImage2DCalls, 1);
+#endif
+#if defined(FLYCAST_LOWEND_PROFILING)
+			LOWEND_TEXTURE_ADD(MipLevelsUploaded, 1);
+			lowend_uploaded_bytes += static_cast<uint64_t>(width) * height * bytes_per_pixel;
+#endif
 			if (mipmapped)
+			{
 				glGenerateMipmap(GL_TEXTURE_2D);
-	}
+#if defined(FLYCAST_LOWEND_PROFILING)
+				LOWEND_TEXTURE_ADD(GenerateMipmapCalls, 1);
+#endif
+			}
+		}
 		glCheck();
+#if defined(FLYCAST_LOWEND_PROFILING)
+		LOWEND_TEXTURE_ADD(Uploads, 1);
+		LOWEND_TEXTURE_ADD(UploadedBytes, lowend_uploaded_bytes);
+		lowend_profile_texture_upload(static_cast<unsigned>(tex_type),
+				lowend_uploaded_bytes,
+				lowend_profile_now_ns() - lowend_texture_upload_start);
+#endif
 	}
 	else {
 		#if FEAT_HAS_SOFTREND
@@ -179,6 +239,9 @@ bool TextureCacheData::Delete()
 	if (texID) {
 		glcache.DeleteTextures(1, &texID);
 	}
+#if defined(FLYCAST_LOWEND_TEXTURE_SUBIMAGE)
+	InvalidateLowendStorage();
+#endif
 	
 	return true;
 }
@@ -342,6 +405,9 @@ void ReadRTTBuffer() {
     	else
     		texture_data->Create();
     	texture_data->texID = gl.rtt.tex;
+#if defined(FLYCAST_LOWEND_TEXTURE_SUBIMAGE)
+		texture_data->InvalidateLowendStorage();
+#endif
     	texture_data->dirty = 0;
       libCore_vramlock_Lock(texture_data->sa_tex, texture_data->sa + texture_data->size - 1, texture_data);
     }
@@ -361,6 +427,7 @@ static float LastTexCacheStats;
 u64 gl_GetTexture(TSP tsp, TCW tcw)
 {
    TexCacheLookups++;
+	LOWEND_TEXTURE_ADD(CacheLookups, 1);
 
 	//lookup texture
    TextureCacheData* tf = TexCache.getTextureCacheData(tsp, tcw);
@@ -369,20 +436,31 @@ u64 gl_GetTexture(TSP tsp, TCW tcw)
    {
 		tf->Create();
 		tf->texID = glcache.GenTexture();
+#if defined(FLYCAST_LOWEND_TEXTURE_SUBIMAGE)
+		tf->InvalidateLowendStorage();
+#endif
+		LOWEND_TEXTURE_ADD(TextureCreates, 1);
 	}
 
 	//update if needed
 	if (tf->NeedsUpdate())
+	{
+		LOWEND_TEXTURE_ADD(CacheMisses, 1);
 		tf->Update();
+	}
    else
    {
       if (tf->IsCustomTextureAvailable())
       {
       	glcache.DeleteTextures(1, &tf->texID);
       	tf->texID = glcache.GenTexture();
+#if defined(FLYCAST_LOWEND_TEXTURE_SUBIMAGE)
+		tf->InvalidateLowendStorage();
+#endif
       	tf->CheckCustomTexture();
       }
       TexCacheHits++;
+		LOWEND_TEXTURE_ADD(CacheHits, 1);
    }
 
 	// Return gl texture

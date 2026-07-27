@@ -8,10 +8,11 @@ Base used by Flycast 2022 Low-End:
 4c293f306bc16a265c2d768af5d0cea138426054
 ```
 
-Naming note: the candidate binaries recorded in this audit used the
-AmberELEC-style `flycast2021_*` option prefix and `Flycast 2021` library name.
-The current source keeps the base revision's `reicast_*`/`Flycast` identity;
-AmberELEC recreates the recorded identity during packaging.
+Naming note: the historical candidate binaries recorded in this audit used
+the `flycast2021_*` option prefix and `Flycast 2021` library name. The current
+source keeps the base revision's `reicast_*`/`Flycast` identity. Current
+AmberELEC packaging instead uses the separate `flycast2022_*` prefix and
+`Flycast 2022 Low-End` library name.
 
 ## Method
 
@@ -89,10 +90,11 @@ The fork contains many aggressive optimizations, but the relevant-looking
 changes are tied to ARM32, VitaGL, Vita allocators, copyless Vita rendering or
 Vita memory constraints. They are not portable evidence for Mali-G31 AArch64.
 
-The later upstream commit that allocates 64-bit dynarec registers and avoids
-some interpreter fallbacks is genuinely interesting for AArch64. A direct
-cherry-pick was attempted and aborted: it conflicts across the ARM64
-recompiler, backend interfaces and related refactors. It is not a safe
+The later upstream commit `62085539` (`dynarec: reg alloc 64-bit regs. avoid
+some interpreter fallbacks`) is genuinely interesting for AArch64. It changes
+16 files across SHIL, SSA, the shared register allocator and multiple
+backends. A fresh `git apply --check` against the review tree failed across
+the central decoder, SHIL, SSA allocator and ARM64 backend. It is not a safe
 standalone backport and would require a dedicated multi-commit port plus
 instruction-level validation.
 

@@ -9,6 +9,7 @@
 */
 #include <array>
 #include "gles.h"
+#include "lowend_profiler.h"
 
 extern int screen_width;
 extern int screen_height;
@@ -350,5 +351,6 @@ void PostProcessor::Render(GLuint output_fbo)
 
    glcache.ClearColor(0.f, 0.f, 0.f, 0.f);
    glClear(GL_COLOR_BUFFER_BIT);
+   LOWEND_PROFILE_COUNT(DrawSubmit, 1);
    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }

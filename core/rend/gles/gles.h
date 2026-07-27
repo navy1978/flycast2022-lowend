@@ -71,6 +71,7 @@ struct PipelineShader
 	bool fog_clamping;
 	bool trilinear;
 	bool palette;
+	u32 fast_depth;
 };
 
 
@@ -151,7 +152,7 @@ void DrawFramebuffer();
 PipelineShader *GetProgram(bool cp_AlphaTest, bool pp_InsideClipping,
 		bool pp_Texture, bool pp_UseAlpha, bool pp_IgnoreTexA, u32 pp_ShadInstr, bool pp_Offset,
 		u32 pp_FogCtrl, bool pp_Gouraud, bool pp_BumpMap, bool fog_clamping, bool trilinear,
-		bool palette);
+		bool palette, u32 fast_depth);
 void vertex_buffer_unmap(void);
 
 void findGLVersion();
@@ -219,6 +220,18 @@ class TextureCacheData : public BaseTextureCacheData
 {
 public:
 	GLuint texID;   //gl texture
+#if defined(FLYCAST_LOWEND_TEXTURE_SUBIMAGE)
+	bool lowend_storage_valid = false;
+	int lowend_storage_width = 0;
+	int lowend_storage_height = 0;
+	GLenum lowend_storage_format = 0;
+	GLenum lowend_storage_type = 0;
+
+	void InvalidateLowendStorage()
+	{
+		lowend_storage_valid = false;
+	}
+#endif
 	virtual std::string GetId() override { return std::to_string(texID); }
 	virtual void UploadToGPU(int width, int height, u8 *temp_tex_buffer, bool mipmapped, bool mipmapsIncluded = false) override;
 	virtual bool Delete() override;

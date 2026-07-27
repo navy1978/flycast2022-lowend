@@ -13,7 +13,7 @@ logic problems.
 ## Compatibility properties
 
 - Direct/dArkOS core option: `reicast_sh4clock`
-- AmberELEC packaged core option: `flycast2021_sh4clock`
+- Current AmberELEC packaged core option: `flycast2022_sh4clock`
 - Exposed values: 50, 75, 100-300 MHz in 20 MHz steps, 350 and 400 MHz
 - Default: 200 MHz
 - At 200 MHz the original Flycast 2021 decoder path is preserved exactly.
@@ -32,11 +32,11 @@ ARM64 Cortex-A35 build:
 SHA-256: 7ed7aca13fabddec62d12b257b4a29d7521b1c566de76af31ab91a2f01f72e52
 ```
 
-The binary was rebuilt from the complete Flycast 2022 Low-End source with the
-SH4 option integrated and the AmberELEC identity, using the established
-Cortex-A35 flags. Binary string inspection confirmed that
-`flycast2021_sh4clock` and its option label are present. A direct or dArkOS
-build of the current source exposes the same option as `reicast_sh4clock`.
+This historical binary was rebuilt with the then-current Flycast 2021
+AmberELEC identity. Binary string inspection confirmed that
+`flycast2021_sh4clock` and its option label are present. Current AmberELEC
+packaging exposes the option as `flycast2022_sh4clock`; a direct or dArkOS
+build exposes it as `reicast_sh4clock`.
 
 The original standalone patch is retained in the development archive:
 

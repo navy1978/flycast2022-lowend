@@ -1,4 +1,5 @@
 #include "Renderer_if.h"
+#include "lowend_profiler.h"
 #include "ta.h"
 #include "hw/pvr/pvr_mem.h"
 #include "rend/TexCache.h"
@@ -166,14 +167,23 @@ bool rend_frame(TA_context* ctx, bool draw_osd)
 	  rend_create_renderer();
 	  rend_init_renderer();
    }
-   bool proc = renderer->Process(ctx);
+   bool proc;
+   {
+	   LOWEND_PROFILE_SCOPE(RendererProcess);
+	   proc = renderer->Process(ctx);
+   }
 #if !defined(TARGET_NO_THREADS)
    if (settings.rend.ThreadedRendering && (!proc || (!ctx->rend.isRenderFramebuffer && !ctx->rend.isRTT)))
 	   // If rendering to texture, continue locking until the frame is rendered
       re.Set();
 #endif
    
-   bool do_swp = proc && renderer->Render();
+   bool do_swp = false;
+   if (proc)
+   {
+	   LOWEND_PROFILE_SCOPE(RendererRender);
+	   do_swp = renderer->Render();
+   }
 
    return do_swp;
 }

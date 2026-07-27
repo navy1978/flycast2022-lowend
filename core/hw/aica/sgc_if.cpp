@@ -22,6 +22,7 @@
 #include "dsp.h"
 #include "aica_mem.h"
 #include "aica_if.h"
+#include "lowend_profiler.h"
 #include <math.h>
 #include <algorithm>
 #undef FAR
@@ -440,6 +441,23 @@ struct ChannelEx
 		rv+=FPMul(s1,(s32)(fp),10);
 
 		return rv;
+	}
+	__forceinline bool StepLowend(s64& sample)
+	{
+		// The old redream mixer stops a channel at key-off instead of
+		// emulating Flycast's release envelope.
+		if (!enabled || AEG.state == EG_Release)
+		{
+			sample = 0;
+			return false;
+		}
+
+		// Match redream's reduced channel path: linear interpolation, total
+		// level attenuation and stream advance only. Deliberately omit AEG,
+		// FEG, LFO advance, pan and DSP routing.
+		sample = FPMul((s64)InterpolateSample(), tl_lut[ccd->TL], 15);
+		StepStream(this);
+		return true;
 	}
 	__forceinline bool Step(SampleType& oLeft, SampleType& oRight, SampleType& oDsp)
 	{
@@ -1348,6 +1366,7 @@ u32 cdda_index=CDDA_SIZE<<1;
 //no DSP for now in this version
 void AICA_Sample32()
 {
+	LOWEND_PROFILE_SCOPE(AudioMix);
 	SampleType mxlr[64];
 	memset(mxlr,0,sizeof(mxlr));
 
@@ -1453,6 +1472,7 @@ void AICA_Sample32()
 
 void AICA_Sample()
 {
+	LOWEND_PROFILE_SCOPE(AudioMix);
 	SampleType mixl,mixr;
 	mixl = 0;
 	mixr = 0;
@@ -1536,6 +1556,39 @@ void AICA_Sample()
 	clip16(mixr);
 
 	WriteSample(mixr,mixl);
+}
+
+/*
+ * Reduced-fidelity low-end mixer modelled after the frame-major
+ * mixer in redream src/guest/aica/aica.c, revision
+ * ffb7302245ff40515cb9f0f0b0e233a4b39342d3 (GPLv3).
+ *
+ * This path retains Flycast's channel decoding and stream state so it can be
+ * selected at runtime, but intentionally follows redream's smaller feature
+ * set: total-level and master-volume scaling only, identical left/right
+ * output, no envelopes, filter, LFO advance, pan, DSP effects or CDDA.
+ */
+void AICA_SampleLowend32()
+{
+	LOWEND_PROFILE_SCOPE(AudioMix);
+
+	for (int frame = 0; frame < 32; frame++)
+	{
+		s64 mix = 0;
+
+		for (int ch = 0; ch < 64; ch++)
+		{
+			s64 channel_sample;
+			if (ChannelEx::Chans[ch].StepLowend(channel_sample))
+				mix += channel_sample;
+		}
+
+		mix = FPMul(mix, volume_lut[CommonData->MVOL], 15);
+		clip(mix, (s64)-32768, (s64)32767);
+
+		if (!settings.aica.NoSound)
+			WriteSample((s16)mix, (s16)mix);
+	}
 }
 
 bool channel_serialize(void **data, unsigned int *total_size)

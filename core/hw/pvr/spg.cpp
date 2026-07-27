@@ -4,6 +4,7 @@
 #include "hw/holly/holly_intc.h"
 #include "hw/holly/sb.h"
 #include "hw/sh4/sh4_sched.h"
+#include "lowend_profiler.h"
 
 u32 in_vblank;
 u32 clc_pvr_scanline;
@@ -116,6 +117,7 @@ int spg_line_sched(int tag, int cycl, int jit)
 		//Vblank start -- really need to test the scanline values
 		if (pvr_cur_scanline==0)
 		{
+			lowend_profile_emulated_frame_boundary();
 			if (SPG_CONTROL.interlace)
 				SPG_STATUS.fieldnum = ~SPG_STATUS.fieldnum;
 			else

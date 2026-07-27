@@ -527,6 +527,7 @@ void LoadSettings(void)
 	settings.dreamcast.FullMMU		= false;
 	settings.aica.LimitFPS			= 0;
 	settings.aica.NoSound			= 0;
+	settings.aica.ArmCyclesPerSample	= 32;
 	settings.pvr.subdivide_transp	= 0;
 	//settings.pvr.Emulation.AlphaSortMode= 0;
 	settings.pvr.Emulation.zMin         = 0.f;

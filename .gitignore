@@ -45,6 +45,17 @@ Workdir/webui*
 Workdir/emu.cfg
 Workdir/lib*ant.properties
 
+# Local RG351V builds, save states and raw benchmark captures are retained on
+# the development machine but are not source-distribution inputs.
+/artifacts/
+/benchmarks/device-states/
+/benchmarks/**/*.log
+/benchmarks/**/*.json
+/benchmarks/**/*.cfg
+/benchmarks/**/*.tar.gz
+/benchmarks/**/*.tgz
+/benchmarks/**/gdb-detail.txt
+
 # Linux stuff
 shell/linux/.map
 shell/linux/nosym-reicast.elf
@@ -55,4 +66,3 @@ reicast-ios.xccheckout
 *.dll
 *.a
 .vscode/c_cpp_properties.json
-
