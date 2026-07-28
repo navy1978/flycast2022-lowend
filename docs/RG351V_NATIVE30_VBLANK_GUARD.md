@@ -50,12 +50,12 @@ For comparison, the reproducible adaptive-v9 commit build produced 38.30 FPS
 on the same heavier gameplay state. The protected historical candidate reached
 41.58 FPS on the earlier reference state.
 
-## Remaining validation
+## Manual validation
 
-Before merging into the v9 release line:
+The clean v2 build was also tested interactively on the RG351V. Gameplay,
+native-30-FPS intermissions, audio quality and the return to gameplay were
+reported as correct. This completed the release-candidate validation.
 
-- manually observe audio and visual pacing in gameplay and both intermissions;
-- confirm that a complete intermission-to-gameplay transition logs exit from
-  native mode and restores adaptive skipping;
-- repeat at least one non-DOA 60-FPS game to check for false classification;
-- retain the protected adaptive-v9 binary and tag as the fallback.
+Cross-game testing should still be expanded before making the cadence guard a
+generic default for every Flycast profile. The protected adaptive-v9 binary and
+tag remain the fallback.
