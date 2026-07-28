@@ -13,6 +13,86 @@
 #include <cmath>
 #include <vector>
 
+static constexpr u32 kFrameSkippingAdaptive = 7;
+static constexpr u32 kAdaptiveOccupancyCritical = 8u;
+static constexpr u32 kAdaptiveOccupancyLow = 18u;
+static constexpr u32 kAdaptiveOccupancySoft = 30u;
+static constexpr u32 kAdaptiveOccupancySafe = 45u;
+static constexpr u32 kAdaptivePressureRecoveryDelay = 16u;
+
+extern "C" u32 flycast_retrorun_get_audio_queue_pressure_v1(void);
+
+namespace
+{
+u32 g_adaptive_ta_skip = 0;
+u32 g_adaptive_pressure_ema = 100;
+u32 g_adaptive_down_delay = 0;
+
+u32 select_adaptive_skip(u32 occupancy)
+{
+	if (occupancy <= kAdaptiveOccupancyCritical)
+		return 3;
+	if (occupancy <= kAdaptiveOccupancyLow)
+		return 2;
+	if (occupancy <= kAdaptiveOccupancySoft)
+		return 1;
+	return 0;
+}
+
+u32 resolve_adaptive_ta_skip()
+{
+	const u32 raw_pressure = flycast_retrorun_get_audio_queue_pressure_v1();
+	g_adaptive_pressure_ema = (g_adaptive_pressure_ema * 7u + raw_pressure) / 8u;
+	const u32 requested = (g_adaptive_pressure_ema < kAdaptiveOccupancySafe)
+		? select_adaptive_skip(g_adaptive_pressure_ema)
+		: 0u;
+
+	if (requested == g_adaptive_ta_skip)
+	{
+		g_adaptive_down_delay = 0;
+		return g_adaptive_ta_skip;
+	}
+
+	if (requested > g_adaptive_ta_skip)
+	{
+		g_adaptive_ta_skip = requested;
+		g_adaptive_down_delay = 0;
+		return g_adaptive_ta_skip;
+	}
+
+	if (g_adaptive_down_delay >= kAdaptivePressureRecoveryDelay)
+	{
+		g_adaptive_down_delay = 0;
+		if (g_adaptive_ta_skip > 0u)
+			--g_adaptive_ta_skip;
+		return g_adaptive_ta_skip;
+	}
+
+	++g_adaptive_down_delay;
+	return g_adaptive_ta_skip;
+}
+
+} // namespace
+
+static u32 resolve_effective_ta_skip()
+{
+	static u32 last_ta_mode = UINT32_MAX;
+	if (settings.pvr.ta_skip != last_ta_mode && settings.pvr.ta_skip != kFrameSkippingAdaptive)
+	{
+		g_adaptive_ta_skip = 0;
+		g_adaptive_pressure_ema = 100;
+		g_adaptive_down_delay = 0;
+	}
+	last_ta_mode = settings.pvr.ta_skip;
+
+	if (settings.pvr.ta_skip != kFrameSkippingAdaptive)
+		return settings.pvr.ta_skip;
+
+	// Adaptive skipping is handled at the render boundary. Dropping TA input
+	// corrupts the scene and still leaves too much per-frame work in place.
+	return 0;
+}
+
 // TODO/FIXME - should be moved later
 bool pal_needs_update=true;
 
@@ -1898,7 +1978,8 @@ bool ta_parse_vdrc(TA_context* ctx)
 
 	ta_parse_cnt++;
 
-	if (ctx->rend.isRTT || 0 == (ta_parse_cnt %  ( settings.pvr.ta_skip + 1)))
+	const u32 ta_skip = resolve_effective_ta_skip();
+	if (ctx->rend.isRTT || 0 == (ta_parse_cnt % (ta_skip + 1)))
 	{
 		TAFifo0.vdec_init();
 

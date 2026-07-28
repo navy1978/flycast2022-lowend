@@ -1,5 +1,6 @@
 #include "gles.h"
 #include "lowend_profiler.h"
+#include <glsym/glsym_es2.h>
 
 #include <algorithm>
 #include <cmath>
@@ -508,6 +509,10 @@ static bool SamePolyState(const PolyParam& left, const PolyParam& right)
 			&& left.texid1 == right.texid1;
 }
 
+#ifndef LOWEND_GLES_MULTI_DRAW
+#define LOWEND_GLES_MULTI_DRAW 1
+#endif
+
 template <u32 Type, bool SortingEnabled>
 static void DrawList(const List<PolyParam>& gply, int first, int count)
 {
@@ -538,16 +543,51 @@ static void DrawList(const List<PolyParam>& gply, int first, int count)
 				active_state = params;
 				active_fast_depth = fast_depth;
 			}
-			LOWEND_PROFILE_COUNT(DrawSubmit, 1);
-#if defined(FLYCAST_LOWEND_PROFILING)
-			lowend_profile_count(Type == ListType_Opaque
-					? LowendProfileStage::DrawOpaque
-					: Type == ListType_Punch_Through
-							? LowendProfileStage::DrawPunchThrough
-							: LowendProfileStage::DrawTranslucent);
+			int submitted_draws = 1;
+#if LOWEND_GLES_MULTI_DRAW
+			GLsizei draw_counts[64];
+			const GLvoid *draw_offsets[64];
+			draw_counts[0] = params->count;
+			draw_offsets[0] = (GLvoid *)(gl.get_index_size() * params->first);
+			while (glMultiDrawElementsEXT != nullptr
+					&& submitted_draws < 64 && submitted_draws <= count)
+			{
+				const PolyParam *next = params + submitted_draws;
+				if (next->count <= 2
+						|| !SamePolyState(*params, *next)
+						|| SelectFastDepthMode(next, Type) != fast_depth)
+					break;
+
+				draw_counts[submitted_draws] = next->count;
+				draw_offsets[submitted_draws] =
+						(GLvoid *)(gl.get_index_size() * next->first);
+				submitted_draws++;
+			}
 #endif
-			glDrawElements(GL_TRIANGLE_STRIP, params->count, gl.index_type,
-						(GLvoid*)(gl.get_index_size() * params->first));
+			LOWEND_PROFILE_COUNT(DrawSubmit, submitted_draws);
+#if defined(FLYCAST_LOWEND_PROFILING)
+			for (int i = 0; i < submitted_draws; i++)
+				lowend_profile_count(Type == ListType_Opaque
+						? LowendProfileStage::DrawOpaque
+						: Type == ListType_Punch_Through
+								? LowendProfileStage::DrawPunchThrough
+								: LowendProfileStage::DrawTranslucent);
+#endif
+#if LOWEND_GLES_MULTI_DRAW
+			if (submitted_draws > 1 && glMultiDrawElementsEXT != nullptr)
+			{
+				glMultiDrawElementsEXT(GL_TRIANGLE_STRIP, draw_counts, gl.index_type,
+						draw_offsets, submitted_draws);
+				params += submitted_draws - 1;
+				count -= submitted_draws - 1;
+			}
+			else
+#endif
+			{
+				glDrawElements(GL_TRIANGLE_STRIP, params->count, gl.index_type,
+							(GLvoid*)(gl.get_index_size() * params->first));
+				submitted_draws = 1;
+			}
 		}
 
 		params++;

@@ -4,6 +4,7 @@
 #include <libretro.h>
 
 #include "gles.h"
+#include "hw/pvr/AdaptiveFrameSkip.h"
 
 #ifndef GL_RED
 #define GL_RED                            0x1903
@@ -847,6 +848,9 @@ static bool RenderFrame(void)
 	DoCleanup();
 
 	bool is_rtt = pvrrc.isRTT;
+	if (!is_rtt && !pvrrc.isRenderFramebuffer
+			&& adaptiveFrameSkipController().skipDrawCurrentFrame())
+		return true;
 
 	float vtx_min_fZ = 0.f;	//pvrrc.fZ_min;
 	float vtx_max_fZ = pvrrc.fZ_max;

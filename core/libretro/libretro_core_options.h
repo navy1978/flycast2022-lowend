@@ -976,6 +976,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
          { "4",         NULL },
          { "5",         NULL },
          { "6",         NULL },
+         { "adaptive",  NULL },
          { NULL, NULL },
       },
       "disabled",

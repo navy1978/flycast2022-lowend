@@ -1,4 +1,5 @@
 #include "Renderer_if.h"
+#include "AdaptiveFrameSkip.h"
 #include "lowend_profiler.h"
 #include "ta.h"
 #include "hw/pvr/pvr_mem.h"
@@ -181,8 +182,17 @@ bool rend_frame(TA_context* ctx, bool draw_osd)
    bool do_swp = false;
    if (proc)
    {
-	   LOWEND_PROFILE_SCOPE(RendererRender);
-	   do_swp = renderer->Render();
+	   const bool screen_frame =
+			   !ctx->rend.isRTT && !ctx->rend.isRenderFramebuffer;
+	   const bool adaptive_enabled = screen_frame
+			   && settings.pvr.ta_skip == AdaptiveFrameSkipController::ModeValue;
+	   const bool skip_draw = adaptiveFrameSkipController().beginFrame(
+			   adaptive_enabled);
+	   {
+		   LOWEND_PROFILE_SCOPE(RendererRender);
+		   do_swp = renderer->Render();
+	   }
+	   adaptiveFrameSkipController().endFrame(adaptive_enabled, !skip_draw);
    }
 
    return do_swp;

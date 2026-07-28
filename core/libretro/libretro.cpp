@@ -3,6 +3,7 @@
 #include <cctype>
 #include <math.h>
 #include <memory>
+#include <atomic>
 #include "types.h"
 #include "lowend_profiler.h"
 #ifndef _WIN32
@@ -123,6 +124,8 @@ static bool allow_service_buttons = false;
 static bool libretro_supports_bitmasks = false;
 
 static bool categoriesSupported = false;
+static constexpr u32 kFrameSkippingAdaptive = 7;
+std::atomic<u32> g_retrorun_audio_queue_occupancy_percent{100};
 
 u32 kcode[4] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
 u8 rt[4] = {0, 0, 0, 0};
@@ -182,6 +185,7 @@ retro_input_state_t        input_cb = NULL;
 retro_audio_sample_batch_t audio_batch_cb = NULL;
 retro_environment_t        environ_cb = NULL;
 retro_environment_t        frontend_clear_thread_waits_cb = NULL;
+extern "C" bool flycast_retrorun_adaptive_skip_draw_v1(void);
 static retro_rumble_interface rumble;
 
 void FlushCache();	// Arm dynarec (arm and x86 only)
@@ -1118,6 +1122,8 @@ static void update_variables(bool first_startup)
    {
 	   if (!strcmp("disabled", var.value))
 		   settings.pvr.ta_skip = 0;
+	   else if (!strcmp("adaptive", var.value))
+		   settings.pvr.ta_skip = kFrameSkippingAdaptive;
 	   else {
 		   settings.pvr.ta_skip = std::max(0, std::min(6, var.value[0] - '0'));
 	   }
@@ -1416,7 +1422,8 @@ void retro_run (void)
 #if defined(HAVE_OPENGL) || defined(HAVE_OPENGLES) || defined(HAVE_VULKAN)
    {
       LOWEND_PROFILE_SCOPE(Present);
-      video_cb(is_dupe ? 0 : RETRO_HW_FRAME_BUFFER_VALID, screen_width, screen_height, 0);
+      video_cb((is_dupe || flycast_retrorun_adaptive_skip_draw_v1())
+            ? 0 : RETRO_HW_FRAME_BUFFER_VALID, screen_width, screen_height, 0);
    }
 #endif
 #if !defined(TARGET_NO_THREADS)
@@ -1957,6 +1964,34 @@ extern "C" int flycast_retrorun_get_product_number_v1(
    memcpy(product_number, first, length);
    product_number[length] = '\0';
    return 1;
+}
+
+/*
+ * Optional private ABI used by RetroRun on each frame to inform Flycast how
+ * saturated the audio queue is.
+ *
+ * queued_frames and capacity_frames are expressed in audio frames (stereo
+ * samples).
+ */
+extern "C" void flycast_retrorun_set_audio_queue_status_v1(
+      uint32_t queued_frames, uint32_t capacity_frames)
+{
+   if (capacity_frames == 0) {
+      g_retrorun_audio_queue_occupancy_percent.store(100, std::memory_order_relaxed);
+      return;
+   }
+   const uint64_t percent =
+      (static_cast<uint64_t>(queued_frames) * 100u) / capacity_frames;
+   const uint32_t clamped =
+      percent > 100u ? 100u : static_cast<uint32_t>(percent);
+   g_retrorun_audio_queue_occupancy_percent.store(clamped,
+                                                  std::memory_order_relaxed);
+}
+
+extern "C" uint32_t flycast_retrorun_get_audio_queue_pressure_v1(void)
+{
+   return g_retrorun_audio_queue_occupancy_percent.load(
+      std::memory_order_relaxed);
 }
 
 #ifdef HAVE_VULKAN
