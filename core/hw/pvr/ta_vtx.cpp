@@ -1555,6 +1555,50 @@ static bool is_top_hud_strip(const PolyParam& poly, const rend_context& ctx)
 			&& bounds.max_y <= clip_min_y + clip_height * 0.30f;
 }
 
+static bool is_vertical_hud_strip(const PolyParam& poly,
+		const rend_context& ctx)
+{
+	if (poly.count < 3
+			|| poly.count > settings.rend.TranslucentMenuGuardMaxVertices)
+		return false;
+
+	StripBounds bounds = {};
+	if (!compute_strip_bounds(poly, ctx, bounds))
+		return false;
+
+	const float clip_min_x = (float)ctx.fb_X_CLIP.min;
+	const float clip_max_x = (float)ctx.fb_X_CLIP.max;
+	const float clip_min_y = (float)ctx.fb_Y_CLIP.min;
+	const float clip_max_y = (float)ctx.fb_Y_CLIP.max;
+	const float clip_width = std::max(1.f, clip_max_x - clip_min_x + 1.f);
+	const float clip_height = std::max(1.f, clip_max_y - clip_min_y + 1.f);
+	const float width = bounds.max_x - bounds.min_x;
+	const float height = bounds.max_y - bounds.min_y;
+	const float z_scale = std::max(1.f,
+			std::max(fabsf(bounds.min_z), fabsf(bounds.max_z)));
+	const bool flat_depth = bounds.max_z - bounds.min_z
+			<= z_scale * settings.rend.TranslucentMenuGuardDepthTolerance;
+
+	// Power meters and similar gauges are short screen-aligned strips:
+	// visibly tall but narrow, inside the viewport and at constant depth.
+	// The constraints avoid treating ordinary world transparency as HUD.
+	return flat_depth
+			&& width <= clip_width * 0.08f
+			&& height >= clip_height * 0.08f
+			&& height >= width * 3.f
+			&& bounds.min_x >= clip_min_x - clip_width * 0.02f
+			&& bounds.max_x <= clip_max_x + clip_width * 0.02f
+			&& bounds.min_y >= clip_min_y - clip_height * 0.02f
+			&& bounds.max_y <= clip_max_y + clip_height * 0.02f;
+}
+
+static bool is_hud_last_strip(const PolyParam& poly,
+		const rend_context& ctx)
+{
+	return is_top_hud_strip(poly, ctx)
+			|| is_vertical_hud_strip(poly, ctx);
+}
+
 // Menu and HUD geometry is not explicitly tagged by the Dreamcast. Detect
 // only the strongest generic signals: a short, screen-aligned strip at almost
 // constant depth, optionally reinforced by overlay-like depth state, screen
@@ -1646,6 +1690,8 @@ static bool is_protected_menu_strip(const PolyParam& poly,
 {
 	if (settings.rend.TranslucentMenuGuardStrategy == 3)
 		return is_top_hud_strip(poly, ctx);
+	if (settings.rend.TranslucentMenuGuardStrategy == 4)
+		return is_hud_last_strip(poly, ctx);
 
 	StripBounds bounds = {};
 	bool flat_depth = false;
@@ -1927,7 +1973,7 @@ static void sort_poly_params_for_merge(List<PolyParam> *polys, int first, int en
 		return;
 	}
 
-	if (settings.rend.TranslucentMenuGuardStrategy == 3)
+	if (settings.rend.TranslucentMenuGuardStrategy >= 3)
 	{
 		// Sort world transparency as in the fast path, then submit the upper
 		// HUD in its original order so nearby scenery cannot cover it.
@@ -1941,7 +1987,11 @@ static void sort_poly_params_for_merge(List<PolyParam> *polys, int first, int en
 		PolyParam *world_end = begin;
 		for (PolyParam *poly = begin; poly != finish; ++poly)
 		{
-			if (is_top_hud_strip(*poly, *ctx))
+			const bool is_hud =
+					settings.rend.TranslucentMenuGuardStrategy == 3
+					? is_top_hud_strip(*poly, *ctx)
+					: is_hud_last_strip(*poly, *ctx);
+			if (is_hud)
 				hud_entries.push_back(*poly);
 			else
 				*world_end++ = *poly;
@@ -2047,7 +2097,7 @@ bool ta_parse_vdrc(TA_context* ctx)
 				// need the older per-strip merge barriers, whose geometry
 				// scoring and extra draw boundaries only add CPU/driver work.
 				const bool guard_index_merges = guard_translucent_menus
-						&& settings.rend.TranslucentMenuGuardStrategy != 3;
+						&& settings.rend.TranslucentMenuGuardStrategy < 3;
 				make_index(&vd_rc.global_param_tr, tr_poly_count,
 						render_pass->tr_count, merge_translucent, &vd_rc,
 						merge_translucent, guard_index_merges);

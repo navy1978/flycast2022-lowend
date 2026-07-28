@@ -422,7 +422,8 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "Scored combines several menu-like signals. Flat protects every short "
       "constant-depth strip. All Short is the broadest diagnostic setting. "
       "Top HUD Last keeps wide geometry confined to the upper HUD band in "
-      "submission order and draws it after sorted world transparency.",
+      "submission order and draws it after sorted world transparency. HUD "
+      "Last additionally protects narrow vertical gauges.",
       NULL,
       "video",
       {
@@ -430,6 +431,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
          { "flat",      "All Flat Short Strips" },
          { "all_short", "All Short Strips" },
          { "top_hud_last", "Top HUD Last (Experimental)" },
+         { "hud_last", "Top + Vertical HUD Last (Experimental)" },
          { NULL, NULL },
       },
       "scored",

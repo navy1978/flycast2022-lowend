@@ -580,7 +580,8 @@ struct settings_t
 		u32 TranslucentMenuGuardRiskThreshold;
 		f32 TranslucentMenuGuardDepthTolerance;
 		// 0: scored, 1: any flat strip, 2: every short strip,
-		// 3: keep geometry confined to the top HUD band last.
+		// 3: keep geometry confined to the top HUD band last,
+		// 4: also keep narrow vertical HUD gauges last.
 		u32 TranslucentMenuGuardStrategy;
 		// 0: disabled, 1: risky overlaps, 2: every overlap.
 		u32 TranslucentMenuGuardOverlap;

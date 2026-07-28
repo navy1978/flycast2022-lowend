@@ -796,6 +796,8 @@ static void update_variables(bool first_startup)
          settings.rend.TranslucentMenuGuardStrategy = 2;
       else if (!strcmp(var.value, "top_hud_last"))
          settings.rend.TranslucentMenuGuardStrategy = 3;
+      else if (!strcmp(var.value, "hud_last"))
+         settings.rend.TranslucentMenuGuardStrategy = 4;
    }
 
    settings.rend.TranslucentMenuGuardOverlap = 1;
