@@ -22,6 +22,11 @@ static u32 lightgun_line = 0xffff;
 static u32 lightgun_hpos;
 static bool maple_int_pending;
 
+u32 spg_vblank_count()
+{
+	return vblk_cnt;
+}
+
 void CalculateSync(void)
 {
 	const u32 pixel_clock = PIXEL_CLOCK / (FB_R_CTRL.vclk_div ? 1 : 2);

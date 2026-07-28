@@ -2,6 +2,7 @@
 
 #include "types.h"
 
+#include <atomic>
 #include <chrono>
 
 class AdaptiveFrameSkipController
@@ -11,6 +12,7 @@ public:
 
 	bool beginFrame(bool enabled);
 	void endFrame(bool enabled, bool rendered);
+	void noteRenderSubmission(bool enabled, u32 vblank_count);
 	bool skipDrawCurrentFrame() const { return skip_current; }
 	void reset();
 
@@ -31,9 +33,19 @@ private:
 	u32 total_frames = 0;
 	u32 total_skipped = 0;
 	u32 telemetry_windows = 0;
+	u32 native_30_entry_level = 0;
+	u32 submission_last_vblank = 0;
+	u32 submission_cadence_samples = 0;
+	u32 submission_two_vblank_samples = 0;
+	u32 submission_one_vblank_exit_samples = 0;
+	u32 submission_cooldown_samples = 0;
 	bool active = false;
 	bool have_speed_sample = false;
 	bool skip_current = false;
+	bool native_30_mode = false;
+	bool submission_tracking_enabled = false;
+	bool have_submission_vblank = false;
+	std::atomic<bool> native_30_detected{false};
 };
 
 AdaptiveFrameSkipController& adaptiveFrameSkipController();

@@ -270,6 +270,10 @@ void rend_start_render(void)
    if (ctx)
    {
       bool is_rtt=(FB_W_SOF1& 0x1000000)!=0 && !ctx->rend.isRenderFramebuffer;
+      if (!is_rtt && !ctx->rend.isRenderFramebuffer)
+         adaptiveFrameSkipController().noteRenderSubmission(
+               settings.pvr.ta_skip == AdaptiveFrameSkipController::ModeValue,
+               spg_vblank_count());
 
       if (!ctx->rend.Overrun)
       {

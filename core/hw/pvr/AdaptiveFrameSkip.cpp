@@ -10,6 +10,10 @@ constexpr u32 PatternSize = 12;
 constexpr u32 MaxLevel = 6;
 constexpr u32 PatternLevels = 10;
 constexpr u32 WarmupFrames = 24;
+constexpr u32 CadenceWindow = 24;
+constexpr u32 Native30MinimumSamples = 20;
+constexpr u32 Native30ExitSamples = 4;
+constexpr u32 Native30CooldownSamples = 48;
 constexpr double DreamcastFrameSeconds = 1.0 / 60.0;
 constexpr double RaiseBelowSpeed = 0.97;
 constexpr double LowerAboveSpeed = 0.995;
@@ -52,9 +56,11 @@ void AdaptiveFrameSkipController::reset()
 	total_frames = 0;
 	total_skipped = 0;
 	telemetry_windows = 0;
+	native_30_entry_level = 0;
 	active = false;
 	have_speed_sample = false;
 	skip_current = false;
+	native_30_mode = false;
 }
 
 void AdaptiveFrameSkipController::start(Clock::time_point now)
@@ -92,11 +98,99 @@ bool AdaptiveFrameSkipController::beginFrame(bool enabled)
 		return false;
 	}
 
+	const bool detected = native_30_detected.load(std::memory_order_acquire);
+	if (detected && !native_30_mode)
+	{
+		native_30_mode = true;
+		native_30_entry_level = level;
+		level = 0;
+		slot = 0;
+		good_windows = 0;
+		NOTICE_LOG(PVR, "Adaptive frame skip: native 30 FPS submission "
+				"cadence detected, draw skipping suspended");
+	}
+	else if (!detected && native_30_mode)
+	{
+		native_30_mode = false;
+		level = native_30_entry_level;
+		slot = 0;
+		good_windows = 0;
+		NOTICE_LOG(PVR, "Adaptive frame skip: native 30 FPS submission "
+				"cadence ended, restoring level %u", level);
+	}
+
+	if (native_30_mode)
+		return false;
+
 	if (warmup_frames < WarmupFrames)
 		return false;
 
 	skip_current = SkipPattern[level][slot];
 	return skip_current;
+}
+
+void AdaptiveFrameSkipController::noteRenderSubmission(
+		bool enabled, u32 vblank_count)
+{
+	if (!enabled)
+	{
+		if (submission_tracking_enabled)
+		{
+			submission_tracking_enabled = false;
+			have_submission_vblank = false;
+			submission_cadence_samples = 0;
+			submission_two_vblank_samples = 0;
+			submission_one_vblank_exit_samples = 0;
+			submission_cooldown_samples = 0;
+			native_30_detected.store(false, std::memory_order_release);
+		}
+		return;
+	}
+	submission_tracking_enabled = true;
+
+	if (!have_submission_vblank)
+	{
+		submission_last_vblank = vblank_count;
+		have_submission_vblank = true;
+		return;
+	}
+
+	const u32 delta = vblank_count - submission_last_vblank;
+	submission_last_vblank = vblank_count;
+	if (submission_cooldown_samples > 0)
+		submission_cooldown_samples--;
+
+	if (native_30_detected.load(std::memory_order_relaxed))
+	{
+		if (delta == 1)
+			submission_one_vblank_exit_samples++;
+		else if (delta == 2)
+			submission_one_vblank_exit_samples = 0;
+
+		if (submission_one_vblank_exit_samples >= Native30ExitSamples)
+		{
+			submission_cadence_samples = 0;
+			submission_two_vblank_samples = 0;
+			submission_one_vblank_exit_samples = 0;
+			submission_cooldown_samples = Native30CooldownSamples;
+			native_30_detected.store(false, std::memory_order_release);
+		}
+		return;
+	}
+
+	submission_cadence_samples++;
+	if (delta == 2)
+		submission_two_vblank_samples++;
+
+	if (submission_cadence_samples < CadenceWindow)
+		return;
+
+	if (submission_cooldown_samples == 0
+			&& submission_two_vblank_samples >= Native30MinimumSamples)
+		native_30_detected.store(true, std::memory_order_release);
+
+	submission_cadence_samples = 0;
+	submission_two_vblank_samples = 0;
 }
 
 void AdaptiveFrameSkipController::endFrame(bool enabled, bool rendered)
@@ -147,6 +241,13 @@ void AdaptiveFrameSkipController::adjustLevel(Clock::time_point now)
 	{
 		const u32 audio_occupancy =
 				flycast_retrorun_get_audio_queue_pressure_v1();
+		if (native_30_mode)
+		{
+			level = 0;
+			good_windows = 0;
+			return;
+		}
+
 		if (speed_ema < RaiseBelowSpeed
 				|| (audio_occupancy <= 12 && speed_ema < LowerAboveSpeed))
 		{
