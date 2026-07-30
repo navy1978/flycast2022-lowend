@@ -602,7 +602,6 @@ struct settings_t
 		bool ForceDisableDivMatching;
 		// Compile LDS Rn,FPSCR directly in the SH4 dynarec. Experimental and
 		// disabled by default; changing it requires a content restart.
-		bool DirectLdsFpscr;
 	} dynarec;
 	
 	struct

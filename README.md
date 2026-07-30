@@ -243,9 +243,7 @@ LOWEND_TEXTURE_SUBIMAGE=1
 `LOWEND_TEXTURE_SUBIMAGE=1` compiles the accepted storage-reuse path and its
 runtime option by default. Set it to `0` for an emergency build-time opt-out.
 Palette/fog lookup reuse is included as the runtime option
-`reicast_palette_fog_storage_reuse` and is disabled by default. Direct SH4
-`LDS FPSCR` decoding is included as the runtime option `reicast_sh4_fpscr`,
-also disabled by default; restart the content after changing it. Opaque-strip
+`reicast_palette_fog_storage_reuse` and is disabled by default. Opaque-strip
 state grouping is exposed as `reicast_opaque_strip_merge`, disabled by
 default. The profiler remains disabled in release builds. The rejected DIV1,
 texture-shadow, PAL4, transient-discard, multi-draw, SH4-timeslice and
@@ -259,7 +257,6 @@ Start with the accurate path:
 ```ini
 reicast_texture_storage_reuse = enabled
 reicast_palette_fog_storage_reuse = disabled
-reicast_sh4_fpscr = disabled
 reicast_aica_arm_cycles = 32
 reicast_adjacent_state_elision = disabled
 reicast_opaque_strip_merge = disabled

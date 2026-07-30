@@ -343,23 +343,6 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "disabled",
    },
    {
-      CORE_OPTION_NAME "_sh4_fpscr",
-      "Direct SH4 FPSCR (Experimental)",
-      NULL,
-      "Compiles the SH4 LDS Rn,FPSCR instruction directly in the dynarec "
-      "instead of falling back to the interpreter. This may improve CPU "
-      "performance on low-end devices. Restart content after changing this "
-      "option. Keep disabled unless the game has been verified.",
-      NULL,
-      "hacks",
-      {
-         { "disabled", NULL },
-         { "enabled",  NULL },
-         { NULL, NULL },
-      },
-      "disabled",
-   },
-   {
       CORE_OPTION_NAME "_adjacent_state_elision",
       "Adjacent Render-State Elision (Experimental)",
       NULL,

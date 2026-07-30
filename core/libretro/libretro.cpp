@@ -727,19 +727,6 @@ static void update_variables(bool first_startup)
    else
       settings.rend.FastDepth = 0;
 
-   var.key = CORE_OPTION_NAME "_sh4_fpscr";
-
-   if (first_startup)
-   {
-      if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
-         settings.dynarec.DirectLdsFpscr = !strcmp(var.value, "enabled");
-      else
-         settings.dynarec.DirectLdsFpscr = false;
-
-      INFO_LOG(DYNAREC, "Direct SH4 LDS FPSCR: %s",
-            settings.dynarec.DirectLdsFpscr ? "enabled" : "disabled");
-   }
-
    var.key = CORE_OPTION_NAME "_adjacent_state_elision";
 
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)

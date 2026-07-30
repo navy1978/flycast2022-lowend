@@ -29,7 +29,6 @@ The resulting low-end option keys are:
 flycast2022_texture_storage_reuse
 flycast2022_palette_fog_storage_reuse
 flycast2022_fast_depth
-flycast2022_sh4_fpscr
 flycast2022_audio_mixer
 flycast2022_aica_arm_cycles
 flycast2022_sh4clock
@@ -50,11 +49,10 @@ AmberELEC's RetroRun launcher writes
 `flycast2022_texture_storage_reuse = enabled` by default and accepts an
 explicit disabled setting as the package-level escape hatch. Palette/fog
 storage reuse is written as disabled unless explicitly enabled.
-Direct SH4 FPSCR decoding is likewise written as disabled unless explicitly
-enabled. `fast_depth = menu_guarded` and
+`fast_depth = menu_guarded` and
 `fast_depth = menu_guarded_shadow_safe` require the corresponding values to
 be preserved by distribution option validation. Restart the content after
-changing Fast Depth or direct SH4 FPSCR decoding.
+changing Fast Depth.
 
 ## dArkOS
 
@@ -66,7 +64,6 @@ will therefore be:
 reicast_texture_storage_reuse
 reicast_palette_fog_storage_reuse
 reicast_fast_depth
-reicast_sh4_fpscr
 reicast_audio_mixer
 reicast_aica_arm_cycles
 reicast_sh4clock

@@ -183,11 +183,10 @@ phase before another implementation.
 
 ## Experiment 2: direct `LDS Rn,FPSCR`
 
-A later isolated build decodes `LDS Rn,FPSCR` into `shop_mov32` followed by
-the existing `shop_sync_fpscr` operation, then terminates the block because
-FPSCR controls FPU banking and decoding. The normal path remains unchanged
-unless the runtime core option `reicast_sh4_fpscr` is enabled. It is disabled
-by default and changing it requires a content restart.
+A later isolated build decoded `LDS Rn,FPSCR` into `shop_mov32` followed by
+the existing `shop_sync_fpscr` operation, then terminated the block because
+FPSCR controls FPU banking and decoding. It exposed the experiment through
+the runtime core option `reicast_sh4_fpscr`.
 
 Three paired Sonic runs used the compatible in-game audio save, five seconds
 of warm-up and exactly 600 core frames. Pair FPS changes were -0.26%, +1.93%
@@ -195,7 +194,7 @@ and +0.71%; the mean was +0.79%. Paired mean core time changed from 25.884 to
 25.574 ms. The candidate loaded the save and exited cleanly, but the result is
 too small and variable to enable by default.
 
-The reviewed implementation is now included in the normal core behind
+The reviewed implementation was initially included in the normal core behind
 `reicast_sh4_fpscr`, disabled by default. A corrected runtime smoke test used
 the same final AArch64 binary for both settings. OFF completed 300 Sonic frames
 in 13.124 seconds (27.491 ms mean core time); ON completed them in 13.204
