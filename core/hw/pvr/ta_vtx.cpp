@@ -14,6 +14,13 @@
 #include <vector>
 
 static constexpr u32 kFrameSkippingAdaptive = 7;
+static constexpr u32 kFrameSkippingAdaptiveBalanced = 8;
+
+static bool isAdaptiveFrameSkipping(u32 mode)
+{
+	return mode == kFrameSkippingAdaptive
+			|| mode == kFrameSkippingAdaptiveBalanced;
+}
 static constexpr u32 kAdaptiveOccupancyCritical = 8u;
 static constexpr u32 kAdaptiveOccupancyLow = 18u;
 static constexpr u32 kAdaptiveOccupancySoft = 30u;
@@ -77,7 +84,8 @@ u32 resolve_adaptive_ta_skip()
 static u32 resolve_effective_ta_skip()
 {
 	static u32 last_ta_mode = UINT32_MAX;
-	if (settings.pvr.ta_skip != last_ta_mode && settings.pvr.ta_skip != kFrameSkippingAdaptive)
+	if (settings.pvr.ta_skip != last_ta_mode
+			&& !isAdaptiveFrameSkipping(settings.pvr.ta_skip))
 	{
 		g_adaptive_ta_skip = 0;
 		g_adaptive_pressure_ema = 100;
@@ -85,7 +93,7 @@ static u32 resolve_effective_ta_skip()
 	}
 	last_ta_mode = settings.pvr.ta_skip;
 
-	if (settings.pvr.ta_skip != kFrameSkippingAdaptive)
+	if (!isAdaptiveFrameSkipping(settings.pvr.ta_skip))
 		return settings.pvr.ta_skip;
 
 	// Adaptive skipping is handled at the render boundary. Dropping TA input

@@ -9,8 +9,13 @@ class AdaptiveFrameSkipController
 {
 public:
 	static constexpr u32 ModeValue = 7;
+	static constexpr u32 BalancedModeValue = 8;
+	static bool isMode(u32 value)
+	{
+		return value == ModeValue || value == BalancedModeValue;
+	}
 
-	bool beginFrame(bool enabled);
+	bool beginFrame(u32 mode_value);
 	void endFrame(bool enabled, bool rendered);
 	void noteRenderSubmission(bool enabled, u32 vblank_count);
 	bool skipDrawCurrentFrame() const { return skip_current; }
@@ -26,6 +31,7 @@ private:
 	Clock::time_point last_boundary;
 	double speed_ema = 1.0;
 	u32 level = 0;
+	u32 maximum_level = 6;
 	u32 slot = 0;
 	u32 warmup_frames = 0;
 	u32 window_frames = 0;

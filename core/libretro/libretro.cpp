@@ -125,6 +125,7 @@ static bool libretro_supports_bitmasks = false;
 
 static bool categoriesSupported = false;
 static constexpr u32 kFrameSkippingAdaptive = 7;
+static constexpr u32 kFrameSkippingAdaptiveBalanced = 8;
 std::atomic<u32> g_retrorun_audio_queue_occupancy_percent{100};
 
 u32 kcode[4] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
@@ -1113,6 +1114,8 @@ static void update_variables(bool first_startup)
 		   settings.pvr.ta_skip = 0;
 	   else if (!strcmp("adaptive", var.value))
 		   settings.pvr.ta_skip = kFrameSkippingAdaptive;
+	   else if (!strcmp("adaptive-balanced", var.value))
+		   settings.pvr.ta_skip = kFrameSkippingAdaptiveBalanced;
 	   else {
 		   settings.pvr.ta_skip = std::max(0, std::min(6, var.value[0] - '0'));
 	   }

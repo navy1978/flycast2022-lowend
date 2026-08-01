@@ -8,6 +8,7 @@ namespace
 {
 constexpr u32 PatternSize = 12;
 constexpr u32 MaxLevel = 6;
+constexpr u32 BalancedMaxLevel = 4;
 constexpr u32 PatternLevels = 10;
 constexpr u32 WarmupFrames = 24;
 constexpr u32 CadenceWindow = 24;
@@ -71,8 +72,10 @@ void AdaptiveFrameSkipController::start(Clock::time_point now)
 	last_boundary = now;
 }
 
-bool AdaptiveFrameSkipController::beginFrame(bool enabled)
+bool AdaptiveFrameSkipController::beginFrame(u32 mode_value)
 {
+	const bool enabled = isMode(mode_value);
+	maximum_level = mode_value == BalancedModeValue ? BalancedMaxLevel : MaxLevel;
 	skip_current = false;
 	const Clock::time_point now = Clock::now();
 	if (!enabled)
@@ -252,7 +255,7 @@ void AdaptiveFrameSkipController::adjustLevel(Clock::time_point now)
 				|| (audio_occupancy <= 12 && speed_ema < LowerAboveSpeed))
 		{
 			const u32 step = speed_ema < 0.55 ? 2 : 1;
-			level = std::min(MaxLevel, level + step);
+			level = std::min(maximum_level, level + step);
 			good_windows = 0;
 			slot = 0;
 		}

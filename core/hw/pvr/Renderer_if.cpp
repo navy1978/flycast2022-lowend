@@ -184,10 +184,11 @@ bool rend_frame(TA_context* ctx, bool draw_osd)
    {
 	   const bool screen_frame =
 			   !ctx->rend.isRTT && !ctx->rend.isRenderFramebuffer;
-	   const bool adaptive_enabled = screen_frame
-			   && settings.pvr.ta_skip == AdaptiveFrameSkipController::ModeValue;
+	   const u32 adaptive_mode = screen_frame ? settings.pvr.ta_skip : 0;
+	   const bool adaptive_enabled =
+			   AdaptiveFrameSkipController::isMode(adaptive_mode);
 	   const bool skip_draw = adaptiveFrameSkipController().beginFrame(
-			   adaptive_enabled);
+			   adaptive_mode);
 	   {
 		   LOWEND_PROFILE_SCOPE(RendererRender);
 		   do_swp = renderer->Render();
@@ -272,7 +273,7 @@ void rend_start_render(void)
       bool is_rtt=(FB_W_SOF1& 0x1000000)!=0 && !ctx->rend.isRenderFramebuffer;
       if (!is_rtt && !ctx->rend.isRenderFramebuffer)
          adaptiveFrameSkipController().noteRenderSubmission(
-               settings.pvr.ta_skip == AdaptiveFrameSkipController::ModeValue,
+               AdaptiveFrameSkipController::isMode(settings.pvr.ta_skip),
                spg_vblank_count());
 
       if (!ctx->rend.Overrun)
