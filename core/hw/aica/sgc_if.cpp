@@ -459,6 +459,74 @@ struct ChannelEx
 		StepStream(this);
 		return true;
 	}
+	__forceinline bool FinishAccurateSample(SampleType sample, u32 ofsatt,
+			SampleType& oLeft, SampleType& oRight, SampleType& oDsp)
+	{
+		u32 const max_att = ((16 << 4) - 1) - ofsatt;
+		s32* logtable = ofsatt + tl_lut;
+
+		u32 dl = std::min(VolMix.DLAtt, max_att);
+		u32 dr = std::min(VolMix.DRAtt, max_att);
+		u32 ds = std::min(VolMix.DSPAtt, max_att);
+
+		oLeft = FPMul(sample, logtable[dl], 15);
+		oRight = FPMul(sample, logtable[dr], 15);
+		oDsp = FPMul(sample, logtable[ds], 11);	// 20 bits
+
+		clip_verify(((s16)oLeft)==oLeft);
+		clip_verify(((s16)oRight)==oRight);
+		clip_verify((oDsp << 12) >> 12 == oDsp);
+		clip_verify(sample*oLeft>=0);
+		clip_verify(sample*oRight>=0);
+		clip_verify((s64)sample*oDsp>=0);
+
+		StepAEG(this);
+		StepFEG(this);
+		StepStream(this);
+		lfo.Step(this);
+		return true;
+	}
+	template<bool FilterEnabled, bool AttenuationEnabled>
+	__forceinline bool StepBatchSample(SampleType& oLeft, SampleType& oRight, SampleType& oDsp)
+	{
+		if (!enabled)
+		{
+			oLeft=oRight=oDsp=0;
+			return false;
+		}
+		else
+		{
+			SampleType sample = InterpolateSample();
+
+			// Low-pass filter
+			if (FilterEnabled)
+			{
+				u32 fv = FEG.GetValue();
+				s32 f = (((fv & 0xFF) | 0x100) << 4) >> ((fv >> 8) ^ 0x1F);
+				f = std::max(1, f);
+				sample = f * sample + (0x2000 - f + FEG.q) * FEG.prev1 - FEG.q * FEG.prev2;
+				sample >>= 13;
+				clip16(sample);
+				FEG.prev2 = FEG.prev1;
+				FEG.prev1 = sample;
+			}
+
+			//Volume & Mixer processing
+			//All attenuations are added together then applied and mixed :)
+
+			//offset is up to 511
+			//*Att is up to 511
+			//logtable handles up to 1024, anything >=255 is mute
+
+			u32 ofsatt = 0;
+			if (AttenuationEnabled)
+			{
+				ofsatt = lfo.alfo + (AEG.GetValue() >> 2);
+				ofsatt = std::min(ofsatt, (u32)255); // make sure it never gets more 255 -- it can happen with some alfo/aeg combinations
+			}
+			return FinishAccurateSample(sample, ofsatt, oLeft, oRight, oDsp);
+		}
+	}
 	__forceinline bool Step(SampleType& oLeft, SampleType& oRight, SampleType& oDsp)
 	{
 		if (!enabled)
@@ -485,7 +553,7 @@ struct ChannelEx
 
 			//Volume & Mixer processing
 			//All attenuations are added together then applied and mixed :)
-			
+
 			//offset is up to 511
 			//*Att is up to 511
 			//logtable handles up to 1024, anything >=255 is mute
@@ -500,31 +568,44 @@ struct ChannelEx
 				ofsatt = lfo.alfo + (AEG.GetValue() >> 2);
 				ofsatt = std::min(ofsatt, (u32)255); // make sure it never gets more 255 -- it can happen with some alfo/aeg combinations
 			}
-			u32 const max_att = ((16 << 4) - 1) - ofsatt;
-			
-			s32* logtable = ofsatt + tl_lut;
-
-			u32 dl = std::min(VolMix.DLAtt, max_att);
-			u32 dr = std::min(VolMix.DRAtt, max_att);
-			u32 ds = std::min(VolMix.DSPAtt, max_att);
-
-			oLeft = FPMul(sample, logtable[dl], 15);
-			oRight = FPMul(sample, logtable[dr], 15);
-			oDsp = FPMul(sample, logtable[ds], 11);	// 20 bits
-
-			clip_verify(((s16)oLeft)==oLeft);
-			clip_verify(((s16)oRight)==oRight);
-			clip_verify((oDsp << 12) >> 12 == oDsp);
-			clip_verify(sample*oLeft>=0);
-			clip_verify(sample*oRight>=0);
-			clip_verify((s64)sample*oDsp>=0);
-
-			StepAEG(this);
-			StepFEG(this);
-			StepStream(this);
-			lfo.Step(this);
-			return true;
+			return FinishAccurateSample(sample, ofsatt, oLeft, oRight, oDsp);
 		}
+	}
+
+	template<bool FilterEnabled, bool AttenuationEnabled>
+	__forceinline u32 StepBatch32(SampleType* mxlr)
+	{
+		u32 samples = 0;
+		for (int i = 0; i < 32; ++i)
+		{
+			SampleType oLeft, oRight, oDsp;
+			if (!StepBatchSample<FilterEnabled, AttenuationEnabled>(oLeft, oRight, oDsp))
+				break;
+
+			++samples;
+			if (oLeft + oRight == 0)
+				oLeft = oRight = oDsp;
+
+			mxlr[i * 2] += oLeft;
+			mxlr[i * 2 + 1] += oRight;
+		}
+		return samples;
+	}
+
+	__forceinline u32 StepBatch32(SampleType* mxlr)
+	{
+		// FEG.active and VOFF only change on AICA register writes. A batch is
+		// generated synchronously, so dispatch once per channel instead of
+		// re-reading both flags for every one of its 32 samples.
+		if (FEG.active)
+		{
+			if (ccd->VOFF == 1)
+				return StepBatch32<true, false>(mxlr);
+			return StepBatch32<true, true>(mxlr);
+		}
+		if (ccd->VOFF == 1)
+			return StepBatch32<false, false>(mxlr);
+		return StepBatch32<false, true>(mxlr);
 	}
 
 	__forceinline void Step(SampleType& mixl, SampleType& mixr)
@@ -1375,17 +1456,24 @@ void AICA_Sample32()
 	u32 sg=0;
 	for (int ch = 0; ch < 64; ch++)
 	{
+		if (settings.aica.AccurateMixerBatch)
+		{
+			sg += Chans[ch].StepBatch32(mxlr);
+			continue;
+		}
+
+		// Compatibility path: retain the original accurate mixer operation
+		// ordering when the experimental fast path is not selected.
 		for (int i=0;i<32;i++)
 		{
 			SampleType oLeft,oRight,oDsp;
-			//stop working on this channel if its turned off ...
 			if (!Chans[ch].Step(oLeft, oRight, oDsp))
 				break;
 
 			sg++;
 
-         if (oLeft + oRight == 0)
-            oLeft = oRight = oDsp;
+			if (oLeft + oRight == 0)
+				oLeft = oRight = oDsp;
 
 			mxlr[i*2+0] += oLeft;
 			mxlr[i*2+1] += oRight;

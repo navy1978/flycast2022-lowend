@@ -804,6 +804,22 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "32",
    },
    {
+      CORE_OPTION_NAME "_accurate_aica_batch",
+      "Accurate AICA Batch Fast Path (Experimental)",
+      NULL,
+      "Hoists stable filter and attenuation checks out of the accurate "
+      "mixer's 32-sample inner loop. This preserves the accurate mixer model "
+      "but is experimental and should only be enabled for validated games.",
+      NULL,
+      "audio",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled",
+   },
+   {
       CORE_OPTION_NAME "_anisotropic_filtering",
       "Anisotropic Filtering",
       NULL,

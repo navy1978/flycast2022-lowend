@@ -1183,6 +1183,12 @@ static void update_variables(bool first_startup)
          settings.aica.ArmCyclesPerSample = cycles;
    }
 
+   settings.aica.AccurateMixerBatch = false;
+   var.key = CORE_OPTION_NAME "_accurate_aica_batch";
+
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+      settings.aica.AccurateMixerBatch = !strcmp("enabled", var.value);
+
    var.key = CORE_OPTION_NAME "_digital_triggers";
 
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
@@ -1956,6 +1962,11 @@ extern "C" int flycast_retrorun_get_product_number_v1(
    memcpy(product_number, first, length);
    product_number[length] = '\0';
    return 1;
+}
+
+extern "C" const char *flycast_retrorun_core_variant_v1(void)
+{
+   return "lowend";
 }
 
 /*

@@ -629,6 +629,10 @@ struct settings_t
 		// Reduced-fidelity AICA mixer modelled after the old GPLv3 redream
 		// mixer. Disabled by default.
 		u32 LowendMixer;
+		// Hoist stable filter/attenuation flags out of the accurate mixer's
+		// 32-sample inner loop. Experimental and disabled by default so the
+		// original mixer remains available per game.
+		u32 AccurateMixerBatch;
 		// ARM7 cycles executed for each generated AICA sample. The Dreamcast
 		// accurate value is 32; lower values deliberately underclock the sound
 		// CPU on low-end hosts while leaving sample generation at 44.1 kHz.
