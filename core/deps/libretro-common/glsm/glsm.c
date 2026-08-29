@@ -2755,8 +2755,8 @@ static void glsm_state_setup(void)
    gl_state.cap_translate[SGL_CLIP_DISTANCE0]       = GL_CLIP_DISTANCE0;
    gl_state.cap_translate[SGL_DEPTH_CLAMP]          = GL_DEPTH_CLAMP;
    gl_state.cap_translate[SGL_PRIMITIVE_RESTART]    = GL_PRIMITIVE_RESTART;
-   gl_state.cap_translate[SGL_PRIMITIVE_RESTART_FIXED_INDEX] = GL_PRIMITIVE_RESTART_FIXED_INDEX;
 #endif
+   gl_state.cap_translate[SGL_PRIMITIVE_RESTART_FIXED_INDEX] = GL_PRIMITIVE_RESTART_FIXED_INDEX;
 
    for (i = 0; i < MAX_ATTRIB; i++)
    {

@@ -16,6 +16,8 @@
  */
 #include <cstdio>
 #include <cstdarg>
+#include <cctype>
+#include <memory>
 #include <math.h>
 #include "types.h"
 #ifndef _WIN32
@@ -58,6 +60,7 @@
 #include "hw/naomi/naomi_cart.h"
 #include "hw/naomi/card_reader.h"
 #include "imgread/common.h"
+#include "reios/reios.h"
 #include "LogManager.h"
 #include "cheats.h"
 #include "rend/CustomTexture.h"
@@ -1594,6 +1597,61 @@ static void remove_extension(char *buf, const char *path, size_t size)
 
 	if (base)
 		*base = '\0';
+}
+
+/*
+ * Optional private ABI used by RetroRun before retro_load_game().  Let the
+ * core inspect GDI/CDI/CHD content so the frontend can select a per-game
+ * profile without duplicating Flycast's disc readers.
+ */
+extern "C" int flycast_retrorun_get_product_number_v1(
+      const char *path, char *product_number, size_t product_number_size)
+{
+   if (!path || !*path || !product_number || product_number_size == 0)
+      return 0;
+
+   product_number[0] = '\0';
+   std::unique_ptr<Disc> image(OpenDisc(path));
+   if (!image || image->sessions.empty())
+      return 0;
+
+   u8 sector[2048] = {};
+   image->ReadSectors(image->GetBaseFAD(), 1, sector, sizeof(sector));
+   if (memcmp(sector, "SEGA SEGAKATANA", 15) != 0)
+      return 0;
+
+   static_assert(sizeof(ip_meta_t) <= sizeof(sector),
+                 "Dreamcast IP metadata must fit in its first sector");
+   ip_meta_t metadata = {};
+   memcpy(&metadata, sector, sizeof(metadata));
+
+   const char *first = metadata.product_number;
+   const char *last = first + sizeof(metadata.product_number);
+   while (first < last &&
+          (*first == '\0' || std::isspace(static_cast<unsigned char>(*first))))
+      ++first;
+   while (last > first &&
+          (last[-1] == '\0' ||
+           std::isspace(static_cast<unsigned char>(last[-1]))))
+      --last;
+
+   const size_t length = static_cast<size_t>(last - first);
+   if (length == 0 || length + 1 > product_number_size)
+      return 0;
+   for (const char *character = first; character != last; ++character)
+   {
+      if (!std::isprint(static_cast<unsigned char>(*character)))
+         return 0;
+   }
+
+   memcpy(product_number, first, length);
+   product_number[length] = '\0';
+   return 1;
+}
+
+extern "C" const char *flycast_retrorun_core_variant_v1(void)
+{
+   return "upstream_620";
 }
 
 #ifdef HAVE_VULKAN
