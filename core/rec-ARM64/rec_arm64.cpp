@@ -68,6 +68,8 @@ static u32 cycle_counter;
 static void (*mainloop)(void *context);
 static int (*arm64_intc_sched)();
 static void (*arm64_no_update)();
+static void (*checkBlockNoFpu)();
+static void (*checkBlockFpu)();
 
 static bool restarting;
 
@@ -1478,6 +1480,34 @@ public:
 		Ldp(x19, x20, MemOperand(sp, 160, PostIndex));
 		Ret();
 
+		// Shared MMU block checks. Keeping these checks out of every compiled
+		// SH4 block substantially reduces generated host code for WinCE games
+		// and improves AArch64 instruction-cache locality.
+		checkBlockFpu = GetCursorAddress<void (*)()>();
+		Label fpu_enabled;
+		Ldr(w10, sh4_context_mem_operand(&sr));
+		Tbz(w10, 15, &fpu_enabled); // test SR.FD bit
+
+		// w0 already contains the guest PC.
+		Mov(w1, 0x800); // event
+		Mov(w2, 0x100); // vector
+		CallRuntime(Do_Exception);
+		Ldr(w29, sh4_context_mem_operand(&next_pc));
+		B(&no_update);
+		Bind(&fpu_enabled);
+		// Fall through to the common virtual/physical address check.
+
+		checkBlockNoFpu = GetCursorAddress<void (*)()>();
+		// w0: virtual address, w1: physical address
+		Ldr(w2, sh4_context_mem_operand(&next_pc));
+		Cmp(w2, w0);
+		Mov(w0, w1);
+		Label shared_blockcheck_success;
+		B(&shared_blockcheck_success, eq);
+		TailCallRuntime(ngen_blockcheckfail);
+		Bind(&shared_blockcheck_success);
+		Ret();
+
 		FinalizeCode();
 		emit_Skip(GetBuffer()->GetSizeInBytes());
 
@@ -1980,54 +2010,53 @@ private:
 
 	void CheckBlock(bool force_checks, RuntimeBlockInfo* block)
 	{
-		if (!mmu_enabled() && !force_checks)
+		if (mmu_enabled())
+		{
+			Mov(w0, block->vaddr);
+			Mov(w1, block->addr);
+			if (block->has_fpu_op)
+				GenCall(*checkBlockFpu);
+			else
+				GenCall(*checkBlockNoFpu);
+		}
+
+		if (!force_checks)
 			return;
 
 		Label blockcheck_fail;
+		s32 sz = block->sh4_code_size;
+		u8* ptr = GetMemPtr(block->addr, sz);
+		if (ptr != NULL)
+		{
+			Ldr(x9, reinterpret_cast<uintptr_t>(ptr));
 
-		if (mmu_enabled())
-		{
-			Ldr(w10, sh4_context_mem_operand(&next_pc));
-			Ldr(w11, block->vaddr);
-			Cmp(w10, w11);
-			B(ne, &blockcheck_fail);
-		}
-		if (force_checks)
-		{
-			s32 sz = block->sh4_code_size;
-			u8* ptr = GetMemPtr(block->addr, sz);
-			if (ptr != NULL)
+			while (sz > 0)
 			{
-				Ldr(x9, reinterpret_cast<uintptr_t>(ptr));
-
-				while (sz > 0)
+				if (sz >= 8)
 				{
-					if (sz >= 8)
-					{
-						Ldr(x10, MemOperand(x9, 8, PostIndex));
-						Ldr(x11, *(u64*)ptr);
-						Cmp(x10, x11);
-						sz -= 8;
-						ptr += 8;
-					}
-					else if (sz >= 4)
-					{
-						Ldr(w10, MemOperand(x9, 4, PostIndex));
-						Ldr(w11, *(u32*)ptr);
-						Cmp(w10, w11);
-						sz -= 4;
-						ptr += 4;
-					}
-					else
-					{
-						Ldrh(w10, MemOperand(x9, 2, PostIndex));
-						Mov(w11, *(u16*)ptr);
-						Cmp(w10, w11);
-						sz -= 2;
-						ptr += 2;
-					}
-					B(ne, &blockcheck_fail);
+					Ldr(x10, MemOperand(x9, 8, PostIndex));
+					Ldr(x11, *(u64*)ptr);
+					Cmp(x10, x11);
+					sz -= 8;
+					ptr += 8;
 				}
+				else if (sz >= 4)
+				{
+					Ldr(w10, MemOperand(x9, 4, PostIndex));
+					Ldr(w11, *(u32*)ptr);
+					Cmp(w10, w11);
+					sz -= 4;
+					ptr += 4;
+				}
+				else
+				{
+					Ldrh(w10, MemOperand(x9, 2, PostIndex));
+					Mov(w11, *(u16*)ptr);
+					Cmp(w10, w11);
+					sz -= 2;
+					ptr += 2;
+				}
+				B(ne, &blockcheck_fail);
 			}
 		}
 		Label blockcheck_success;
@@ -2037,22 +2066,6 @@ private:
 		TailCallRuntime(ngen_blockcheckfail);
 
 		Bind(&blockcheck_success);
-
-		if (mmu_enabled() && block->has_fpu_op)
-		{
-			Label fpu_enabled;
-			Ldr(w10, sh4_context_mem_operand(&sr));
-			Tbz(w10, 15, &fpu_enabled);			// test SR.FD bit
-
-			Mov(*call_regs[0], block->vaddr);	// pc
-			Mov(*call_regs[1], 0x800);			// event
-			Mov(*call_regs[2], 0x100);			// vector
-			CallRuntime(Do_Exception);
-			Ldr(w29, sh4_context_mem_operand(&next_pc));
-			GenBranch(*arm64_no_update);
-
-			Bind(&fpu_enabled);
-		}
 	}
 
 	void shil_param_to_host_reg(const shil_param& param, const Register& reg)
