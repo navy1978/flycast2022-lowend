@@ -20,6 +20,47 @@
 
 static RuntimeBlockInfo* blk;
 
+// Upstream 095e5ede8 replaced the old one-cycle-per-instruction estimate
+// with a pipeline-aware counter. The later tree stores a detailed exception
+// class for every opcode; this fork still stores the exception fix-up needed
+// by its older dynarec. Memory operations are therefore identified through
+// their decoded read/write mode without changing that compatibility data.
+class AccurateSh4CycleCounter
+{
+public:
+	u32 countCycles(u16 op)
+	{
+		const sh4_opcodelistentry *descriptor = OpDesc[op];
+		u32 cycles = 0;
+		const DecMode mode = static_cast<DecMode>((descriptor->decode >> 24) & 0xff);
+		if (descriptor->decode != 0 &&
+			(mode == DM_ReadM || mode == DM_WriteM))
+			cycles = mmu_enabled() ? 5 : 2;
+
+		if (lastUnit == CO || descriptor->unit == CO ||
+			(lastUnit == descriptor->unit && lastUnit != MT))
+		{
+			lastUnit = descriptor->unit;
+			cycles += descriptor->IssueCycles;
+		}
+		else
+		{
+			lastUnit = CO;
+		}
+		return cycles;
+	}
+
+	void reset()
+	{
+		lastUnit = CO;
+	}
+
+private:
+	sh4_eu lastUnit = CO;
+};
+
+static AccurateSh4CycleCounter accurateCycleCounter;
+
 static const char idle_hash[] =
 	//BIOS
        ">:1:05:13B23363"
@@ -872,8 +913,15 @@ static bool dec_generic(u32 op)
 					Emit(shop_div32p2, mk_reg(div_som_reg3), mk_reg(div_som_reg3), mk_reg(div_som_reg2), 0, mk_reg(reg_sr_T));
 					
 					//skip the aggregated opcodes
+					if (settings.dreamcast.sh4CycleMode != 0)
+					{
+						for (int i = 1; i <= 64; i++)
+							blk->guest_cycles += accurateCycleCounter.countCycles(
+								IReadMem16(state.cpu.rpc + i * 2));
+					}
+					else
+						blk->guest_cycles += CPU_RATIO * 64;
 					state.cpu.rpc += 128;
-					blk->guest_cycles += CPU_RATIO*64;
 				}
 				else
 				{
@@ -904,8 +952,15 @@ static bool dec_generic(u32 op)
 					Emit(shop_and, mk_reg(reg_sr_T), mk_reg(reg_sr_T), mk_imm(1));							// clean up T
 					
 					//skip the aggregated opcodes
+					if (settings.dreamcast.sh4CycleMode != 0)
+					{
+						for (int i = 1; i <= 64; i++)
+							blk->guest_cycles += accurateCycleCounter.countCycles(
+								IReadMem16(state.cpu.rpc + i * 2));
+					}
+					else
+						blk->guest_cycles += CPU_RATIO * 64;
 					state.cpu.rpc += 128;
-					blk->guest_cycles += CPU_RATIO * 64;
 				}
 				else
 				{
@@ -974,6 +1029,8 @@ bool dec_DecodeBlock(RuntimeBlockInfo* rbi,u32 max_cycles)
 	ngen_GetFeatures(&state.ngen);
 	
 	blk->guest_opcodes=0;
+	if (settings.dreamcast.sh4CycleMode != 0)
+		accurateCycleCounter.reset();
 	// If full MMU, don't allow the block to extend past the end of the current 4K page
 	u32 max_pc = mmu_enabled() ? ((state.cpu.rpc >> 12) + 1) << 12 : 0xFFFFFFFF;
 	
@@ -997,7 +1054,11 @@ bool dec_DecodeBlock(RuntimeBlockInfo* rbi,u32 max_cycles)
                u32 op = IReadMem16(state.cpu.rpc);
 
 					blk->guest_opcodes++;
-					if (!mmu_enabled())
+					if (settings.dreamcast.sh4CycleMode != 0)
+					{
+						blk->guest_cycles += accurateCycleCounter.countCycles(op);
+					}
+					else if (!mmu_enabled())
 					{
 						if (op>=0xF000)
 							blk->guest_cycles+=0;
@@ -1080,8 +1141,16 @@ _end:
 #endif
 #endif
 
-	//cycle tricks
-	if (settings.dynarec.idleskip)
+	if (settings.dreamcast.sh4CycleMode != 0)
+	{
+		// The accurate upstream path intentionally bypasses hash-based idle
+		// skipping, syscall multipliers and the WinCE multiplier.
+		const u32 clock = std::max(1U, settings.dreamcast.sh4clock);
+		blk->guest_cycles = static_cast<u32>(
+			(static_cast<u64>(blk->guest_cycles) * 200U + clock / 2U) / clock);
+	}
+	// Legacy Flycast 2021 cycle tricks.
+	else if (settings.dynarec.idleskip)
 	{
 		//Experimental hash-id based idle skip
 		if (!mmu_enabled() && strstr(idle_hash, blk->hash()))
@@ -1127,23 +1196,26 @@ _end:
 	{
 		blk->guest_cycles*=1.5;
 	}
-	// Win CE boost
-	if (mmu_enabled())
+	// Win CE boost is part of the legacy heuristic model only.
+	if (settings.dreamcast.sh4CycleMode == 0 && mmu_enabled())
 		blk->guest_cycles *= 1.5f;
 
-	if (settings.dreamcast.sh4clock == 200)
+	if (settings.dreamcast.sh4CycleMode == 0)
 	{
-		// Preserve Flycast 2021's original path exactly at the default.
-		blk->guest_cycles = std::min(blk->guest_cycles,max_cycles);
-	}
-	else
-	{
-		// Model SH4 under/overclocking by changing the number of guest cycles
-		// assigned to the compiled block. This follows current Flycast and is
-		// kept behind an explicit core option.
-		const u32 clock = std::max(1U, settings.dreamcast.sh4clock);
-		blk->guest_cycles = static_cast<u32>(
-			(static_cast<u64>(blk->guest_cycles) * 200U + clock / 2U) / clock);
+		if (settings.dreamcast.sh4clock == 200)
+		{
+			// Preserve Flycast 2021's original path exactly at the default.
+			blk->guest_cycles = std::min(blk->guest_cycles,max_cycles);
+		}
+		else
+		{
+			// Model SH4 under/overclocking by changing the number of guest cycles
+			// assigned to the compiled block. This follows current Flycast and is
+			// kept behind an explicit core option.
+			const u32 clock = std::max(1U, settings.dreamcast.sh4clock);
+			blk->guest_cycles = static_cast<u32>(
+				(static_cast<u64>(blk->guest_cycles) * 200U + clock / 2U) / clock);
+		}
 	}
 	//make sure we don't use wayy-too-few cycles
 	blk->guest_cycles = std::max(1U,blk->guest_cycles);

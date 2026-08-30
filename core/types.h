@@ -600,6 +600,9 @@ struct settings_t
 		bool disable_vmem32;
 		bool DisableDivMatching;
 		bool ForceDisableDivMatching;
+		// Use shared AArch64 MMU/FPU block-check helpers instead of emitting
+		// the same checks into every SH4 block. Restart required.
+		bool SharedBlockChecks;
 		// Compile LDS Rn,FPSCR directly in the SH4 dynarec. Experimental and
 		// disabled by default; changing it requires a content restart.
 	} dynarec;
@@ -616,6 +619,9 @@ struct settings_t
 		u32 broadcast;		// 0 -> NTSC, 1 -> PAL, 2 -> PAL/M, 3 -> PAL/N, 4 -> default
 		u32 language;		// 0 -> JP, 1 -> EN, 2 -> DE, 3 -> FR, 4 -> SP, 5 -> IT, 6 -> default
 		u32 sh4clock;		// emulated SH4 clock in MHz (default 200)
+		// 0 preserves the Flycast 2021 timing heuristics; 1 uses the
+		// pipeline-aware SH4 cycle model introduced upstream in 095e5ede8.
+		u32 sh4CycleMode;
 		bool FullMMU;
 		bool ForceWinCE;
 	} dreamcast;

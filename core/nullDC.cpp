@@ -523,12 +523,13 @@ void LoadSettings(void)
 	//disable_nvmem can't be loaded, because nvmem init is before cfg load
 	settings.dynarec.disable_vmem32 = false;
 	settings.UpdateModeForced     = 0;
-	settings.dreamcast.sh4clock		= 200;
+	if (settings.dreamcast.sh4clock == 0)
+		settings.dreamcast.sh4clock	= 200;
 	settings.dreamcast.FullMMU		= false;
 	settings.aica.LimitFPS			= 0;
 	settings.aica.NoSound			= 0;
-	settings.aica.AccurateMixerBatch	= 0;
-	settings.aica.ArmCyclesPerSample	= 32;
+	if (settings.aica.ArmCyclesPerSample == 0)
+		settings.aica.ArmCyclesPerSample = 32;
 	settings.pvr.subdivide_transp	= 0;
 	//settings.pvr.Emulation.AlphaSortMode= 0;
 	settings.pvr.Emulation.zMin         = 0.f;

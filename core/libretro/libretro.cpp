@@ -423,6 +423,8 @@ static void set_variable_visibility(void)
    environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
    option_display.key = CORE_OPTION_NAME "_sh4clock";
    environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
+   option_display.key = CORE_OPTION_NAME "_sh4_cycle_mode";
+   environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
    option_display.key = CORE_OPTION_NAME "_cable_type";
    environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
    option_display.key = CORE_OPTION_NAME "_broadcast";
@@ -622,10 +624,28 @@ static void update_variables(bool first_startup)
          settings.dynarec.Type = 1;
    }
 
+   if (first_startup)
+   {
+      var.key = CORE_OPTION_NAME "_shared_block_checks";
+      settings.dynarec.SharedBlockChecks = false;
+
+      if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+         settings.dynarec.SharedBlockChecks = !strcmp(var.value, "enabled");
+   }
+
    var.key = CORE_OPTION_NAME "_sh4clock";
    settings.dreamcast.sh4clock = 200;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
       settings.dreamcast.sh4clock = std::max(1UL, strtoul(var.value, NULL, 0));
+
+   if (first_startup)
+   {
+      var.key = CORE_OPTION_NAME "_sh4_cycle_mode";
+      settings.dreamcast.sh4CycleMode = 0;
+      if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value &&
+          !strcmp(var.value, "accurate"))
+         settings.dreamcast.sh4CycleMode = 1;
+   }
 
    var.key = CORE_OPTION_NAME "_boot_to_bios";
 

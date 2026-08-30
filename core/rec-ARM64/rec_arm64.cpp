@@ -331,7 +331,14 @@ public:
 		regalloc.DoAlloc(block);
 
 		// scheduler
-		if (mmu_enabled())
+		// Upstream 0b1f69bfd checks the timeslice before charging the block,
+		// so a block that has not run is not counted in the previous slice.
+		const bool accurateCycles = settings.dreamcast.sh4CycleMode != 0;
+		if (accurateCycles && !mmu_enabled())
+		{
+			Cmp(w27, 0);
+		}
+		else if (mmu_enabled())
 		{
 			Mov(x1, reinterpret_cast<uintptr_t>(&cycle_counter));
 			Ldr(w0, MemOperand(x1));
@@ -352,6 +359,8 @@ public:
 		GenBranch(*arm64_no_update);
 		Bind(&cpu_running);
 		Bind(&cycles_remaining);
+		if (accurateCycles && !mmu_enabled())
+			Sub(w27, w27, block->guest_cycles);
 
 		for (size_t i = 0; i < block->oplist.size(); i++)
 		{
@@ -2010,53 +2019,70 @@ private:
 
 	void CheckBlock(bool force_checks, RuntimeBlockInfo* block)
 	{
-		if (mmu_enabled())
-		{
-			Mov(w0, block->vaddr);
-			Mov(w1, block->addr);
-			if (block->has_fpu_op)
-				GenCall(*checkBlockFpu);
-			else
-				GenCall(*checkBlockNoFpu);
-		}
-
-		if (!force_checks)
+		if (!mmu_enabled() && !force_checks)
 			return;
 
 		Label blockcheck_fail;
-		s32 sz = block->sh4_code_size;
-		u8* ptr = GetMemPtr(block->addr, sz);
-		if (ptr != NULL)
+		const bool useSharedChecks = mmu_enabled()
+				&& settings.dynarec.SharedBlockChecks;
+		if (mmu_enabled())
 		{
-			Ldr(x9, reinterpret_cast<uintptr_t>(ptr));
-
-			while (sz > 0)
+			if (useSharedChecks)
 			{
-				if (sz >= 8)
-				{
-					Ldr(x10, MemOperand(x9, 8, PostIndex));
-					Ldr(x11, *(u64*)ptr);
-					Cmp(x10, x11);
-					sz -= 8;
-					ptr += 8;
-				}
-				else if (sz >= 4)
-				{
-					Ldr(w10, MemOperand(x9, 4, PostIndex));
-					Ldr(w11, *(u32*)ptr);
-					Cmp(w10, w11);
-					sz -= 4;
-					ptr += 4;
-				}
+				Mov(w0, block->vaddr);
+				Mov(w1, block->addr);
+				if (block->has_fpu_op)
+					GenCall(*checkBlockFpu);
 				else
-				{
-					Ldrh(w10, MemOperand(x9, 2, PostIndex));
-					Mov(w11, *(u16*)ptr);
-					Cmp(w10, w11);
-					sz -= 2;
-					ptr += 2;
-				}
+					GenCall(*checkBlockNoFpu);
+			}
+			else
+			{
+				Ldr(w10, sh4_context_mem_operand(&next_pc));
+				Ldr(w11, block->vaddr);
+				Cmp(w10, w11);
 				B(ne, &blockcheck_fail);
+			}
+		}
+		if (useSharedChecks && !force_checks)
+			return;
+
+		if (force_checks)
+		{
+			s32 sz = block->sh4_code_size;
+			u8* ptr = GetMemPtr(block->addr, sz);
+			if (ptr != NULL)
+			{
+				Ldr(x9, reinterpret_cast<uintptr_t>(ptr));
+
+				while (sz > 0)
+				{
+					if (sz >= 8)
+					{
+						Ldr(x10, MemOperand(x9, 8, PostIndex));
+						Ldr(x11, *(u64*)ptr);
+						Cmp(x10, x11);
+						sz -= 8;
+						ptr += 8;
+					}
+					else if (sz >= 4)
+					{
+						Ldr(w10, MemOperand(x9, 4, PostIndex));
+						Ldr(w11, *(u32*)ptr);
+						Cmp(w10, w11);
+						sz -= 4;
+						ptr += 4;
+					}
+					else
+					{
+						Ldrh(w10, MemOperand(x9, 2, PostIndex));
+						Mov(w11, *(u16*)ptr);
+						Cmp(w10, w11);
+						sz -= 2;
+						ptr += 2;
+					}
+					B(ne, &blockcheck_fail);
+				}
 			}
 		}
 		Label blockcheck_success;
@@ -2066,6 +2092,22 @@ private:
 		TailCallRuntime(ngen_blockcheckfail);
 
 		Bind(&blockcheck_success);
+
+		if (mmu_enabled() && block->has_fpu_op && !useSharedChecks)
+		{
+			Label fpu_enabled;
+			Ldr(w10, sh4_context_mem_operand(&sr));
+			Tbz(w10, 15, &fpu_enabled); // test SR.FD bit
+
+			Mov(*call_regs[0], block->vaddr); // pc
+			Mov(*call_regs[1], 0x800); // event
+			Mov(*call_regs[2], 0x100); // vector
+			CallRuntime(Do_Exception);
+			Ldr(w29, sh4_context_mem_operand(&next_pc));
+			GenBranch(*arm64_no_update);
+
+			Bind(&fpu_enabled);
+		}
 	}
 
 	void shil_param_to_host_reg(const shil_param& param, const Register& reg)

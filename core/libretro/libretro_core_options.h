@@ -99,6 +99,25 @@ struct retro_core_option_v2_definition option_defs_us[] = {
 #endif
    },
 #endif
+#if HOST_CPU == CPU_ARM64
+   {
+      CORE_OPTION_NAME "_shared_block_checks",
+      "AArch64 Shared Block Checks (Restart Required)",
+      NULL,
+      "Uses shared MMU and FPU block-check helpers instead of emitting the "
+      "same checks into every compiled SH4 block. This reduces generated "
+      "AArch64 code and can improve instruction-cache locality. Experimental; "
+      "enable only for validated game and device profiles.",
+      NULL,
+      "hacks",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled",
+   },
+#endif
    {
       CORE_OPTION_NAME "_sh4clock",
       "SH4 CPU Under/Overclock",
@@ -125,6 +144,20 @@ struct retro_core_option_v2_definition option_defs_us[] = {
          { NULL, NULL },
       },
       "200",
+   },
+   {
+      CORE_OPTION_NAME "_sh4_cycle_mode",
+      "SH4 Cycle Model (Restart Required)",
+      NULL,
+      "Selects how compiled SH4 blocks are charged to the emulated scheduler. Legacy preserves Flycast 2021 behaviour. Accurate uses the pipeline-aware upstream model and may improve demanding games, but changes timing and must be validated per game.",
+      NULL,
+      "hacks",
+      {
+         { "legacy",   "Legacy (Default)" },
+         { "accurate", "Accurate (Experimental)" },
+         { NULL, NULL },
+      },
+      "legacy",
    },
    {
       CORE_OPTION_NAME "_boot_to_bios",
