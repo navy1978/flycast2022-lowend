@@ -117,7 +117,41 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       },
       "disabled",
    },
+   {
+      CORE_OPTION_NAME "_mmu_address_lut",
+      "AArch64 WinCE MMU Address LUT (Restart Required)",
+      NULL,
+      "Caches full-MMU virtual-to-physical translations in separate read and "
+      "write lookup tables instead of using the legacy vmem32 fault mapper. "
+      "This can substantially improve WinCE games on low-end AArch64 devices. "
+      "Experimental; enable only for validated game and device profiles.",
+      NULL,
+      "hacks",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled",
+   },
 #endif
+   {
+      CORE_OPTION_NAME "_fmov_fpr64",
+      "Compile FPU Transfers with PR=1 (Restart Required)",
+      NULL,
+      "Compiles FMOV, FLDS and FSTS in the SH4 dynarec while double-precision "
+      "arithmetic mode is active. These transfer instructions do not depend "
+      "on arithmetic precision. Experimental; enable only for validated game "
+      "and device profiles.",
+      NULL,
+      "hacks",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled",
+   },
    {
       CORE_OPTION_NAME "_sh4clock",
       "SH4 CPU Under/Overclock",
@@ -815,6 +849,22 @@ struct retro_core_option_v2_definition option_defs_us[] = {
          { NULL, NULL },
       },
       "accurate",
+   },
+   {
+      CORE_OPTION_NAME "_aica_better_lpf",
+      "Corrected AICA Low-Pass Filter (Restart Required)",
+      NULL,
+      "Uses the corrected upstream AICA low-pass filter coefficient mapping. "
+      "This can improve audio quality in affected games without simplifying "
+      "the mixer. Experimental; enable only for validated game profiles.",
+      NULL,
+      "audio",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled",
    },
    {
       CORE_OPTION_NAME "_aica_arm_cycles",

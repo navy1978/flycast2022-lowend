@@ -733,8 +733,16 @@ static bool dec_generic(u32 op)
 	{
 		state.info.has_fpu=true;
 		//return false;//FPU off for now
-		if (state.cpu.FPR64 /*|| state.cpu.FSZ64*/)
-			return false;
+		if (state.cpu.FPR64)
+		{
+			// FMOV, FLDS and FSTS transfer raw register bits and do not depend
+			// on FPSCR.PR. Keep all double-precision arithmetic on the original
+			// interpreter path unless this focused experiment is enabled.
+			if (!settings.dynarec.FmovFpr64
+					|| (((op & 0xf) < 6 || (op & 0xf) > 0xc)
+						&& (op & 0xef) != 0x0d))
+				return false;
+		}
 
 		if (state.cpu.FSZ64 && (d==PRM_FRN_SZ || d==PRM_FRM_SZ || s==PRM_FRN_SZ || s==PRM_FRM_SZ))
 			transfer_64=true;

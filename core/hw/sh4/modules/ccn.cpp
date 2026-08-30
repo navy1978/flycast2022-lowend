@@ -47,8 +47,13 @@ void CCN_PTEH_write(u32 addr, u32 value)
 {
 	CCN_PTEH_type temp;
 	temp.reg_data = value;
-	if (temp.ASID != CCN_PTEH.ASID && vmem32_enabled())
-		vmem32_flush_mmu();
+	if (temp.ASID != CCN_PTEH.ASID)
+	{
+		if (mmu_address_lut_enabled())
+			mmuAddressLUTFlush(false);
+		else if (vmem32_enabled())
+			vmem32_flush_mmu();
+	}
 
 	CCN_PTEH = temp;
 }

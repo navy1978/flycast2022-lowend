@@ -603,6 +603,14 @@ struct settings_t
 		// Use shared AArch64 MMU/FPU block-check helpers instead of emitting
 		// the same checks into every SH4 block. Restart required.
 		bool SharedBlockChecks;
+		// Use explicit read/write address translation caches for full-MMU
+		// AArch64 memory accesses instead of the legacy vmem32 fault mapper.
+		// Experimental, per-game opt-in; changing it requires a restart.
+		bool MmuAddressLUT;
+		// Compile FMOV/FLDS/FSTS while FPSCR.PR is set. These transfer
+		// instructions do not depend on floating-point arithmetic precision.
+		// Experimental, disabled by default and restart required.
+		bool FmovFpr64;
 		// Compile LDS Rn,FPSCR directly in the SH4 dynarec. Experimental and
 		// disabled by default; changing it requires a content restart.
 	} dynarec;
@@ -639,6 +647,9 @@ struct settings_t
 		// 32-sample inner loop. Experimental and disabled by default so the
 		// original mixer remains available per game.
 		u32 AccurateMixerBatch;
+		// Use the corrected upstream AICA low-pass filter coefficient mapping.
+		// Disabled by default and enabled only by validated game profiles.
+		u32 BetterLpf;
 		// ARM7 cycles executed for each generated AICA sample. The Dreamcast
 		// accurate value is 32; lower values deliberately underclock the sound
 		// CPU on low-end hosts while leaving sample generation at 44.1 kHz.

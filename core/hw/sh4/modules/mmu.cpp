@@ -12,6 +12,26 @@ u32 ITLB_LRU_USE[64];
 // Used when FullMMU is off
 u32 sq_remap[64];
 
+#if HOST_CPU == CPU_ARM64 && !defined(NO_MMU)
+alignas(64) u32 mmuAddressLUT[MMU_LUT_ACCESS_COUNT][MMU_ADDRESS_LUT_PAGE_COUNT];
+#endif
+
+void mmuAddressLUTFlush(bool full)
+{
+#if HOST_CPU == CPU_ARM64 && !defined(NO_MMU)
+	if (!mmu_address_lut_enabled())
+		return;
+
+	const size_t pageCount = full
+		? MMU_ADDRESS_LUT_PAGE_COUNT / 2 // user memory only
+		: (32 * 1024 * 1024) >> 12;     // WinCE slot zero
+	for (u32 access = 0; access < MMU_LUT_ACCESS_COUNT; ++access)
+		memset(mmuAddressLUT[access], 0, pageCount * sizeof(u32));
+#else
+	(void)full;
+#endif
+}
+
 #if defined(NO_MMU)
 
 //Sync memory mapping to MMU , suspend compiled blocks if needed.entry is a UTLB entry # , -1 is for full sync
@@ -628,8 +648,11 @@ void mmu_set_state()
 {
 	if (CCN_MMUCR.AT == 1 && settings.dreamcast.FullMMU)
 	{
-		NOTICE_LOG(SH4, "Enabling Full MMU support");
-		_vmem_enable_mmu(true);
+		if (mmu_address_lut_enabled())
+			NOTICE_LOG(SH4, "Enabling Full MMU support with AArch64 address LUT");
+		else
+			NOTICE_LOG(SH4, "Enabling Full MMU support with legacy vmem32");
+		_vmem_enable_mmu(!mmu_address_lut_enabled());
 	}
 	else
 		_vmem_enable_mmu(false);
@@ -654,6 +677,17 @@ void MMU_init()
 		}
 	}
 	mmu_set_state();
+#if HOST_CPU == CPU_ARM64 && !defined(NO_MMU)
+	if (mmu_address_lut_enabled())
+	{
+		// P1/P2/P4 addresses aren't translated. Keeping their identity mapping
+		// resident avoids a miss on every kernel access.
+		for (u32 access = 0; access < MMU_LUT_ACCESS_COUNT; ++access)
+			for (u32 vpn = MMU_ADDRESS_LUT_PAGE_COUNT / 2;
+				 vpn < MMU_ADDRESS_LUT_PAGE_COUNT; ++vpn)
+				mmuAddressLUT[access][vpn] = vpn << 12;
+	}
+#endif
 }
 
 
@@ -681,6 +715,7 @@ void mmu_flush_table()
 
 	for (u32 i = 0; i < 64; i++)
 		UTLB[i].Data.V = 0;
+	mmuAddressLUTFlush(true);
 }
 #endif
 

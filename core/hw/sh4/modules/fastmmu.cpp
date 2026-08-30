@@ -342,5 +342,6 @@ void mmu_flush_table()
 {
 	lru_entry = NULL;
 	flush_cache();
+	mmuAddressLUTFlush(true);
 }
 #endif 	// FAST_MMU

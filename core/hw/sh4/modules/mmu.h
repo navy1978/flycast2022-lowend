@@ -57,6 +57,34 @@ static INLINE bool mmu_enabled()
 #endif
 }
 
+// The address-LUT path is currently implemented by the AArch64 dynarec only.
+// It is a startup option so generated blocks and memory mappings always agree.
+static INLINE bool mmu_address_lut_enabled()
+{
+#if HOST_CPU == CPU_ARM64 && !defined(NO_MMU)
+	return settings.dynarec.MmuAddressLUT;
+#else
+	return false;
+#endif
+}
+
+enum MmuAddressLutAccess
+{
+	MMU_LUT_READ = 0,
+	MMU_LUT_WRITE = 1,
+	MMU_LUT_ACCESS_COUNT = 2,
+};
+
+constexpr u32 MMU_ADDRESS_LUT_PAGE_COUNT = 0x100000;
+
+#if HOST_CPU == CPU_ARM64 && !defined(NO_MMU)
+// Separate caches preserve write-protection and first-write checks even when a
+// page was translated for reading first.
+extern u32 mmuAddressLUT[MMU_LUT_ACCESS_COUNT][MMU_ADDRESS_LUT_PAGE_COUNT];
+#endif
+
+void mmuAddressLUTFlush(bool full);
+
 template<bool internal = false>
 u32 mmu_full_lookup(u32 va, const TLB_Entry **entry, u32& rv);
 u32 mmu_instruction_lookup(u32 va, const TLB_Entry **entry, u32& rv);

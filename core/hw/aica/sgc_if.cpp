@@ -502,11 +502,19 @@ struct ChannelEx
 			if (FilterEnabled)
 			{
 				u32 fv = FEG.GetValue();
-				s32 f = (((fv & 0xFF) | 0x100) << 4) >> ((fv >> 8) ^ 0x1F);
-				f = std::max(1, f);
-				sample = f * sample + (0x2000 - f + FEG.q) * FEG.prev1 - FEG.q * FEG.prev2;
-				sample >>= 13;
-				clip16(sample);
+				s32 f;
+				if (settings.aica.BetterLpf)
+					f = (((fv & 0x1FF) | 0x200) << 3) >> ((fv >> 9) ^ 0xF);
+				else
+					f = std::max(1, (((s32)(fv & 0xFF) | 0x100) << 4) >> ((fv >> 8) ^ 0x1F));
+				if (f == 0)
+					sample = 0;
+				else
+				{
+					sample = f * sample + (0x2000 - f + FEG.q) * FEG.prev1 - FEG.q * FEG.prev2;
+					sample >>= 13;
+					clip16(sample);
+				}
 				FEG.prev2 = FEG.prev1;
 				FEG.prev1 = sample;
 			}
@@ -542,11 +550,19 @@ struct ChannelEx
 			if (FEG.active)
 			{
 				u32 fv = FEG.GetValue();
-				s32 f = (((fv & 0xFF) | 0x100) << 4) >> ((fv >> 8) ^ 0x1F);
-				f = std::max(1, f);
-				sample = f * sample + (0x2000 - f + FEG.q) * FEG.prev1 - FEG.q * FEG.prev2;
-				sample >>= 13;
-				clip16(sample);
+				s32 f;
+				if (settings.aica.BetterLpf)
+					f = (((fv & 0x1FF) | 0x200) << 3) >> ((fv >> 9) ^ 0xF);
+				else
+					f = std::max(1, (((s32)(fv & 0xFF) | 0x100) << 4) >> ((fv >> 8) ^ 0x1F));
+				if (f == 0)
+					sample = 0;
+				else
+				{
+					sample = f * sample + (0x2000 - f + FEG.q) * FEG.prev1 - FEG.q * FEG.prev2;
+					sample >>= 13;
+					clip16(sample);
+				}
 				FEG.prev2 = FEG.prev1;
 				FEG.prev1 = sample;
 			}
@@ -890,6 +906,8 @@ struct ChannelEx
 		case 0x19://FNS,OCT
 			UpdatePitch();
 			UpdateAEG();
+			if (settings.aica.BetterLpf)
+				UpdateFEG();
 			break;
 
 		case 0x1C://ALFOS,ALFOWS,PLFOS

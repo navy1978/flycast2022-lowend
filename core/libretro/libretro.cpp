@@ -631,6 +631,18 @@ static void update_variables(bool first_startup)
 
       if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
          settings.dynarec.SharedBlockChecks = !strcmp(var.value, "enabled");
+
+      var.key = CORE_OPTION_NAME "_mmu_address_lut";
+      settings.dynarec.MmuAddressLUT = false;
+
+      if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+         settings.dynarec.MmuAddressLUT = !strcmp(var.value, "enabled");
+
+      var.key = CORE_OPTION_NAME "_fmov_fpr64";
+      settings.dynarec.FmovFpr64 = false;
+
+      if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+         settings.dynarec.FmovFpr64 = !strcmp(var.value, "enabled");
    }
 
    var.key = CORE_OPTION_NAME "_sh4clock";
@@ -1192,6 +1204,12 @@ static void update_variables(bool first_startup)
       settings.aica.LowendMixer = !strcmp("lowend", var.value);
    else
       settings.aica.LowendMixer = false;
+
+   settings.aica.BetterLpf = false;
+   var.key = CORE_OPTION_NAME "_aica_better_lpf";
+
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+      settings.aica.BetterLpf = !strcmp("enabled", var.value);
 
    settings.aica.ArmCyclesPerSample = 32;
    var.key = CORE_OPTION_NAME "_aica_arm_cycles";

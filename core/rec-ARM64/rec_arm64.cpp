@@ -144,6 +144,51 @@ static void WriteMemNoEx(u32 addr, T data, u32 pc)
 #endif
 }
 
+#ifndef NO_MMU
+static u32 MmuAddressLutLookup(u32 vaddr, u32 write, u32 pc, u32 size)
+{
+	u32 paddr = 0;
+	u32 rv;
+
+	if (write)
+	{
+		switch (size)
+		{
+		case 1: rv = mmu_data_translation<MMU_TT_DWRITE, u8>(vaddr, paddr); break;
+		case 2: rv = mmu_data_translation<MMU_TT_DWRITE, u16>(vaddr, paddr); break;
+		case 4: rv = mmu_data_translation<MMU_TT_DWRITE, u32>(vaddr, paddr); break;
+		case 8: rv = mmu_data_translation<MMU_TT_DWRITE, u64>(vaddr, paddr); break;
+		default: die("Invalid MMU address LUT write size"); return 0;
+		}
+	}
+	else
+	{
+		switch (size)
+		{
+		case 1: rv = mmu_data_translation<MMU_TT_DREAD, u8>(vaddr, paddr); break;
+		case 2: rv = mmu_data_translation<MMU_TT_DREAD, u16>(vaddr, paddr); break;
+		case 4: rv = mmu_data_translation<MMU_TT_DREAD, u32>(vaddr, paddr); break;
+		case 8: rv = mmu_data_translation<MMU_TT_DREAD, u64>(vaddr, paddr); break;
+		default: die("Invalid MMU address LUT read size"); return 0;
+		}
+	}
+
+	if (unlikely(rv != MMU_ERROR_NONE))
+	{
+		DoMMUException(vaddr, rv, write ? MMU_TT_DWRITE : MMU_TT_DREAD);
+		LOWEND_DYNAREC_ADD(Exceptions, 1);
+		spc = pc;
+		longjmp(jmp_env, 1);
+	}
+
+	if ((vaddr >> 31) == 0)
+		mmuAddressLUT[write ? MMU_LUT_WRITE : MMU_LUT_READ][vaddr >> 12]
+			= paddr & ~PAGE_MASK;
+
+	return paddr;
+}
+#endif
+
 static void interpreter_fallback(u16 op, OpCallFP *oph, u32 pc)
 {
 	lowend_profile_dynarec_fallback(op);
@@ -1129,6 +1174,8 @@ public:
 		case 1:
 			if (!mmu_enabled())
 				GenCallRuntime(ReadMem8);
+			else if (mmu_address_lut_enabled())
+				GenCallRuntime(_vmem_ReadMem8);
 			else
 				GenCallRuntime(ReadMemNoEx<u8>);
 			Sxtb(w0, w0);
@@ -1137,6 +1184,8 @@ public:
 		case 2:
 			if (!mmu_enabled())
 				GenCallRuntime(ReadMem16);
+			else if (mmu_address_lut_enabled())
+				GenCallRuntime(_vmem_ReadMem16);
 			else
 				GenCallRuntime(ReadMemNoEx<u16>);
 			Sxth(w0, w0);
@@ -1145,6 +1194,8 @@ public:
 		case 4:
 			if (!mmu_enabled())
 				GenCallRuntime(ReadMem32);
+			else if (mmu_address_lut_enabled())
+				GenCallRuntime(_vmem_ReadMem32);
 			else
 				GenCallRuntime(ReadMemNoEx<u32>);
 			break;
@@ -1152,6 +1203,8 @@ public:
 		case 8:
 			if (!mmu_enabled())
 				GenCallRuntime(ReadMem64);
+			else if (mmu_address_lut_enabled())
+				GenCallRuntime(_vmem_ReadMem64);
 			else
 				GenCallRuntime(ReadMemNoEx<u64>);
 			break;
@@ -1172,6 +1225,8 @@ public:
 		case 1:
 			if (!mmu_enabled())
 				GenCallRuntime(WriteMem8);
+			else if (mmu_address_lut_enabled())
+				GenCallRuntime(_vmem_WriteMem8);
 			else
 				GenCallRuntime(WriteMemNoEx<u8>);
 			break;
@@ -1179,6 +1234,8 @@ public:
 		case 2:
 			if (!mmu_enabled())
 				GenCallRuntime(WriteMem16);
+			else if (mmu_address_lut_enabled())
+				GenCallRuntime(_vmem_WriteMem16);
 			else
 				GenCallRuntime(WriteMemNoEx<u16>);
 			break;
@@ -1186,6 +1243,8 @@ public:
 		case 4:
 			if (!mmu_enabled())
 				GenCallRuntime(WriteMem32);
+			else if (mmu_address_lut_enabled())
+				GenCallRuntime(_vmem_WriteMem32);
 			else
 				GenCallRuntime(WriteMemNoEx<u32>);
 			break;
@@ -1193,6 +1252,8 @@ public:
 		case 8:
 			if (!mmu_enabled())
 				GenCallRuntime(WriteMem64);
+			else if (mmu_address_lut_enabled())
+				GenCallRuntime(_vmem_WriteMem64);
 			else
 				GenCallRuntime(WriteMemNoEx<u64>);
 			break;
@@ -1430,6 +1491,8 @@ public:
 			Blr(x1);
 
 			Ldr(x28, MemOperand(sp));	// Set context
+			if (mmu_address_lut_enabled())
+				Mov(x27, reinterpret_cast<uintptr_t>(mmuAddressLUT[MMU_LUT_READ]));
 		}
 		else
 		{
@@ -1580,16 +1643,50 @@ private:
 			B(&code_label, cond);
 	}
 
+	void GenMmuAddressLookup(const shil_opcode& op, bool write, u32 size)
+	{
+		if (!mmu_enabled() || !mmu_address_lut_enabled())
+			return;
+
+		Label cached;
+		Label done;
+
+		Lsr(w1, w0, 12);
+		if (write)
+		{
+			// The write table immediately follows the read table (4 MiB).
+			Add(x2, x27, MMU_ADDRESS_LUT_PAGE_COUNT * sizeof(u32));
+			Ldr(w1, MemOperand(x2, x1, LSL, 2));
+		}
+		else
+		{
+			Ldr(w1, MemOperand(x27, x1, LSL, 2));
+		}
+		Cbnz(w1, &cached);
+
+		Mov(w1, write ? 1 : 0);
+		Mov(w2, block->vaddr + op.guest_offs - (op.delay_slot ? 2 : 0));
+		Mov(w3, size);
+		GenCallRuntime(MmuAddressLutLookup);
+		B(&done);
+
+		Bind(&cached);
+		And(w0, w0, PAGE_MASK);
+		Orr(w0, w0, w1);
+		Bind(&done);
+	}
+
 	void GenReadMemory(const shil_opcode& op, size_t opid, bool optimise)
 	{
 		if (GenReadMemoryImmediate(op))
 			return;
 
-		GenMemAddr(op, call_regs[0]);
-		if (mmu_enabled())
+		u32 size = op.flags & 0x7f;
+		GenMemAddr(op, &w0);
+		GenMmuAddressLookup(op, false, size);
+		if (mmu_enabled() && !mmu_address_lut_enabled())
 			Mov(*call_regs[2], block->vaddr + op.guest_offs - (op.delay_slot ? 2 : 0));	// pc
 
-		u32 size = op.flags & 0x7f;
 		if (!optimise || !GenReadMemoryFast(op, opid))
 			GenReadMemorySlow(size);
 
@@ -1760,7 +1857,8 @@ private:
 	bool GenReadMemoryFast(const shil_opcode& op, size_t opid)
 	{
 		// Direct memory access. Need to handle SIGSEGV and rewrite block as needed. See ngen_Rewrite()
-		if (!_nvmem_enabled() || (mmu_enabled() && !vmem32_enabled()))
+		if (!_nvmem_enabled()
+				|| (mmu_enabled() && !mmu_address_lut_enabled() && !vmem32_enabled()))
 			return false;
 
 		Instruction *start_instruction = GetCursorAddress<Instruction *>();
@@ -1806,11 +1904,12 @@ private:
 		if (GenWriteMemoryImmediate(op))
 			return;
 
-		GenMemAddr(op, call_regs[0]);
-		if (mmu_enabled())
+		u32 size = op.flags & 0x7f;
+		GenMemAddr(op, &w0);
+		GenMmuAddressLookup(op, true, size);
+		if (mmu_enabled() && !mmu_address_lut_enabled())
 			Mov(*call_regs[2], block->vaddr + op.guest_offs - (op.delay_slot ? 2 : 0));	// pc
 
-		u32 size = op.flags & 0x7f;
 		if (size != 8)
 			shil_param_to_host_reg(op.rs2, *call_regs[1]);
 		else
@@ -1969,7 +2068,8 @@ private:
 	bool GenWriteMemoryFast(const shil_opcode& op, size_t opid)
 	{
 		// Direct memory access. Need to handle SIGSEGV and rewrite block as needed. See ngen_Rewrite()
-		if (!_nvmem_enabled() || (mmu_enabled() && !vmem32_enabled()))
+		if (!_nvmem_enabled()
+				|| (mmu_enabled() && !mmu_address_lut_enabled() && !vmem32_enabled()))
 			return false;
 
 		Instruction *start_instruction = GetCursorAddress<Instruction *>();
