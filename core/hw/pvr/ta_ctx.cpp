@@ -147,6 +147,33 @@ bool QueueRender(TA_context* ctx)
       }
    }
 
+#if !defined(TARGET_NO_THREADS)
+   // Keep the historical low-end default unchanged.  Selected profiles can
+   // opt into the modern producer-side policy: wait once for the render
+   // already in flight, then retain the legacy rejection as a shutdown-safe
+   // fallback if the queue is still occupied.  Keep it inactive when core
+   // frame skipping is selected so that its deliberate drops remain intact.
+   const unsigned frame_skip = settings.pvr.ta_skip > 0
+         ? static_cast<unsigned>(settings.pvr.ta_skip) : 0u;
+   const bool no_drop_effective = settings.pvr.RenderQueueNoDrop
+         && settings.rend.ThreadedRendering && frame_skip == 0;
+   static unsigned last_no_drop_state = ~0u;
+   const unsigned no_drop_state = (settings.pvr.RenderQueueNoDrop ? 1u : 0u)
+         | (settings.rend.ThreadedRendering ? 2u : 0u)
+         | (frame_skip << 2);
+   if (no_drop_state != last_no_drop_state)
+   {
+      NOTICE_LOG(PVR,
+            "Low-End render queue no-drop runtime: requested=%s effective=%s threaded=%s frame_skip=%u",
+            settings.pvr.RenderQueueNoDrop ? "yes" : "no",
+            no_drop_effective ? "yes" : "no",
+            settings.rend.ThreadedRendering ? "yes" : "no", frame_skip);
+      last_no_drop_state = no_drop_state;
+   }
+
+   if (no_drop_effective && rqueue)
+      frame_finished.Wait();
+#endif
 
 	if (rqueue)
    {

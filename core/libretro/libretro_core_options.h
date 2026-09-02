@@ -1031,6 +1031,23 @@ struct retro_core_option_v2_definition option_defs_us[] = {
 #endif
    },
    {
+      CORE_OPTION_NAME "_render_queue_no_drop",
+      "Render Queue No-Drop",
+      NULL,
+      "When threaded rendering is enabled, waits once for a pending render "
+      "to finish instead of silently dropping the next selected frame. "
+      "Inactive when core frame skipping is enabled. Experimental; enable "
+      "only for validated game and device profiles.",
+      NULL,
+      "hacks",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled",
+   },
+   {
       CORE_OPTION_NAME "_delay_frame_swapping",
       "Delay Frame Swapping",
       NULL,

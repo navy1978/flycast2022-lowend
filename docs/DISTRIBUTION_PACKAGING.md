@@ -41,6 +41,7 @@ flycast2022_translucent_menu_guard_risk
 flycast2022_translucent_menu_guard_depth_tolerance
 flycast2022_translucent_menu_guard_overlap
 flycast2022_translucent_menu_guard_draw_sorting
+flycast2022_render_queue_no_drop
 ```
 
 The separate identity prevents its settings, overrides and save states from
@@ -76,11 +77,19 @@ reicast_translucent_menu_guard_risk
 reicast_translucent_menu_guard_depth_tolerance
 reicast_translucent_menu_guard_overlap
 reicast_translucent_menu_guard_draw_sorting
+reicast_render_queue_no_drop
 ```
 
 Keep the libretro library name as `Flycast`. The distribution may copy or
 rename `flycast_libretro.so` to the core filename selected by EmulationStation;
 that packaging filename does not alter the option prefix.
+
+`render_queue_no_drop` is an experimental compatibility/performance option.
+It is disabled by default, has an effect only with threaded rendering and core
+frame skipping disabled, and must be enabled only by a manually validated
+per-game and per-device profile. AmberELEC exposes it as
+`flycast2022_render_queue_no_drop`; source and dArkOS builds expose it as
+`reicast_render_queue_no_drop`.
 
 The source repository for this low-end core is:
 

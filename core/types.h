@@ -701,6 +701,12 @@ struct settings_t
 		
 		u32 MaxThreads;
 		u32 SynchronousRendering;
+		// When threaded rendering is enabled and core frame skipping is off,
+		// wait for the pending render context instead of silently dropping the
+		// next selected frame.
+		// This is controlled exclusively by the libretro core option and must
+		// not be reset by LoadSettings(), which runs after update_variables().
+		bool RenderQueueNoDrop;
 	} pvr;
 
 	unsigned UpdateMode;

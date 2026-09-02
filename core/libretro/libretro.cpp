@@ -1128,6 +1128,11 @@ static void update_variables(bool first_startup)
    else
 	   settings.pvr.SynchronousRendering = 0;
 
+   var.key = CORE_OPTION_NAME "_render_queue_no_drop";
+   var.value = NULL;
+   settings.pvr.RenderQueueNoDrop = environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var)
+         && var.value && !strcmp("enabled", var.value);
+
    var.key = CORE_OPTION_NAME "_delay_frame_swapping";
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
